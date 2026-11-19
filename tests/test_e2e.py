@@ -32,6 +32,14 @@ def call(method, path, body=None):
 
 
 def main():
+    # Reset config/status ve trang thai sach truoc khi chay — lan chay
+    # truoc de lai batch1.com trong config.json (va status cu trong
+    # status.json) nen E2E phai doc lap, khong phu thuoc lan chay truoc.
+    import copy
+    import store
+    store.save_config(copy.deepcopy(store.DEFAULT_CONFIG))
+    if store.STATUS_FILE.exists():
+        store.STATUS_FILE.unlink()
     mock = ThreadingHTTPServer(("127.0.0.1", MOCK_PORT), MockHandler)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
     STATE["nc_ns"]["elvellia.com"] = [NS1, NS2]

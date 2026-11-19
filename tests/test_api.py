@@ -25,6 +25,7 @@ STATE = {
     "records": {},    # zone_id -> [rec]
     "nc_ns": {},      # domain -> [ns...]
     "nc_calls": 0,    # so lan goi Namecheap getList (de test bo qua NC)
+    "nc_rate_limit": {},  # domain -> so lan con lai tra "Too many requests"
     "email": {},      # zone_id -> {enabled, status, rules:[], addresses:[]}
     "settings": {},   # zone_id -> {ssl, always_use_https, automatic_https_rewrites}
     "rulesets": {},   # zone_id -> {id, phase, rules:[]} hoac chua co
@@ -143,6 +144,16 @@ class MockHandler(BaseHTTPRequestHandler):
                 xml = (f'<?xml version="1.0" encoding="utf-8"?>'
                        f'<ApiResponse Status="ERROR"{NS}><Errors>'
                        f'<Error Number="1011150">Invalid request IP: 9.9.9.9</Error>'
+                       f'</Errors><Warnings /><RequestedCommand />'
+                       f'<Server>Server 1</Server></ApiResponse>')
+            elif STATE.get("nc_rate_limit", {}).get(dom, 0) > 0:
+                # Gia lap Namecheap gioi han toc do: tra "Too many requests"
+                # vai lan roi moi cho qua (de test tu thu lai).
+                STATE["nc_rate_limit"][dom] -= 1
+                STATE["nc_calls"] += 1
+                xml = (f'<?xml version="1.0" encoding="utf-8"?>'
+                       f'<ApiResponse Status="ERROR"{NS}><Errors>'
+                       f'<Error Number="...">Too many requests</Error>'
                        f'</Errors><Warnings /><RequestedCommand />'
                        f'<Server>Server 1</Server></ApiResponse>')
             elif cmd == "namecheap.domains.dns.getList":
@@ -360,6 +371,7 @@ def main():
     os.environ["DOH_BASE"] = base + "/dns-query"
 
     import app as dash
+    import nc_api
     from cf_api import CFClient
     from nc_api import NCClient, split_domain
     from dns_check import doh_ns
@@ -831,6 +843,35 @@ def main():
     checked, limited, kept = dash._check_many(["skipncbatch.com"], cfg6, st33c)
     assert checked == 1 and not limited and STATE["nc_calls"] == 0, \
         (checked, limited, STATE["nc_calls"])
+    print("  OK", flush=True)
+
+    print("TEST 34: NCClient tu thu lai khi dinh 'Too many requests'...", flush=True)
+    nc_api.NC_RETRY_WAITS = (0, 0)  # test khoi doi that
+    nc = dash._nc_client(cfg6)
+    STATE["nc_rate_limit"] = {"ratelimit-once.com": 1, "ratelimit-always.com": 99}
+    STATE["nc_calls"] = 0
+    ns34 = nc.get_nameservers("ratelimit-once.com")
+    assert ns34 == ["dns1.registrar-servers.com", "dns2.registrar-servers.com"], ns34
+    assert STATE["nc_calls"] == 2, STATE["nc_calls"]  # loi 1 lan roi thu lai thanh cong
+    # Loi mai: het luot thu thi bao loi ro (co huong dan doi 2 phut).
+    try:
+        nc.get_nameservers("ratelimit-always.com")
+        raise AssertionError("phai bao loi")
+    except Exception as e:
+        assert "giới hạn tốc độ" in str(e) and "2 phút" in str(e), e
+    assert STATE["nc_calls"] == 2 + 3, STATE["nc_calls"]  # 1 + 2 lan thu lai
+    nc_api.NC_RETRY_WAITS = (30, 60)
+    print("  OK", flush=True)
+
+    print("TEST 35: phat hien gioi han toc do ('Too many requests')...", flush=True)
+    assert dash._is_rate_limited({"error": "Too many requests"}), "is_rate_limited"
+    assert dash._is_rate_limited({"registrar_ns_error": "Too many requests"})
+    assert not dash._is_rate_limited({"error": None})
+    assert dash._setup_hit_rate_limit({"steps": [
+        {"step": "Đổi NS ở Namecheap", "ok": False,
+         "detail": "Namecheap giới hạn tốc độ (Too many requests) — đợi ~2 phút rồi thử lại"}]})
+    assert not dash._setup_hit_rate_limit({"steps": [
+        {"step": "Đổi NS ở Namecheap", "ok": True, "detail": "registrar da ghi: a, b"}]})
     print("  OK", flush=True)
 
     srv.shutdown()

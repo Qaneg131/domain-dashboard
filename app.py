@@ -29,7 +29,7 @@ from pathlib import Path
 from cf_api import (CFClient, CFError, _is_email_routing_record,
                     _is_gsc_record, expand_name)
 from dns_check import doh_ns, my_ip
-from nc_api import NCClient, NCError
+from nc_api import NCClient, NCError, _is_rate_limit_msg
 from store import load_config, save_config, load_status, save_status, BASE_DIR
 
 PORT = int(os.environ.get("PORT", "8787"))
@@ -618,7 +618,18 @@ def _is_rate_limited(st):
         texts.append(str(v.get("error", "")))
     texts.append(str(st.get("registrar_ns_error", "")))
     joined = " ".join(texts)
-    return "429" in joined or "throttl" in joined.lower()
+    return ("429" in joined or "throttl" in joined.lower()
+            or "too many requests" in joined.lower())
+
+
+def _setup_hit_rate_limit(res):
+    """Ket qua setup co dinh gioi han toc do Namecheap/Cloudflare khong
+    (buoc nao loi voi 'Too many requests' / 'throttling' / 429) — de
+    dung loat setup, khong de domain sau cung loi theo."""
+    for s in (res or {}).get("steps", []):
+        if not s.get("ok") and _is_rate_limit_msg(str(s.get("detail", ""))):
+            return True
+    return False
 
 
 def _save_check_result(st, d, new_st):
@@ -801,12 +812,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/setup-all":
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 results = []
+                rate_limited = False
                 for d in cfg["domains"]:
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
                     _save_check_result(st, d, check_domain(d, cfg))
+                    if _setup_hit_rate_limit(res):
+                        # Namecheap dang gioi han toc do — dung loat, khong
+                        # de cac domain sau cung loi theo.
+                        rate_limited = True
+                        break
                 save_status(st)
-                self._json({"ok": all(r["ok"] for r in results), "results": results})
+                self._json({"ok": all(r["ok"] for r in results), "results": results,
+                            "rate_limited": rate_limited})
             elif path == "/api/setup-batch":
                 # Setup theo danh sach nhap trong phien nay (moi dong 1 domain).
                 # Chi xu ly dung cac domain trong danh sach — khong dong
@@ -822,15 +840,22 @@ class Handler(BaseHTTPRequestHandler):
                         domains.append(d)
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 results = []
+                rate_limited = False
                 for d in domains:
                     if d not in cfg["domains"]:
                         cfg["domains"].append(d)
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
                     _save_check_result(st, d, check_domain(d, cfg))
+                    if _setup_hit_rate_limit(res):
+                        # Namecheap dang gioi han toc do — dung loat, khong
+                        # de cac domain sau cung loi theo.
+                        rate_limited = True
+                        break
                 save_config(cfg)
                 save_status(st)
-                self._json({"ok": all(r["ok"] for r in results), "results": results})
+                self._json({"ok": all(r["ok"] for r in results), "results": results,
+                            "rate_limited": rate_limited})
             elif path == "/api/email-preset":
                 ep = {"enabled": bool(body.get("enabled", True)), "rules": []}
                 for r in (body.get("rules") or []):

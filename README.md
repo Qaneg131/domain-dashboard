@@ -107,6 +107,30 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   Cloudflare (HTTPS đọc 1 lần qua endpoint /settings bulk thay vì
   4 lần; Namecheap chỉ gọi khi DoH chưa xác nhận NS) nên ít dính 429
   hơn.
+- **Domain bị lỗi** — domain nào kiểm tra lỗi (vd Namecheap báo "Too
+  many requests") thì **không tính là đã xong**: "Kiểm tra tất cả" sẽ
+  kiểm tra lại nó ở lần sau, thanh công cụ hiện số domain bị lỗi
+  (vd "⚠️ 87 domain bị lỗi") kèm nút **Kiểm tra lại domain bị lỗi**
+  (chỉ chạy những domain lỗi, theo loat 30), và bộ lọc DNS có thêm
+  mục **Lỗi**. Kiểm tra lại mà lỗi thì **giữ nguyên trạng thái tốt cũ**
+  — lỗi thoáng qua (429/throttle) không xóa dữ liệu đã có.
+- **Namecheap giới hạn tốc độ (Too many requests)** — Namecheap API
+  giới hạn khá chặt: gọi dồn nhiều domain cùng lúc (nhất là chạy
+  Setup nhiều domain, hoặc chạy Kiểm tra + Setup cùng lúc) thì bước
+  "Đổi NS ở Namecheap" sẽ lỗi "Too many requests". Tool tự xử lý:
+  mỗi lần gọi Namecheap mà dính giới hạn thì **tự đợi rồi thử lại
+  2 lần** (30s rồi 60s); vẫn lỗi thì báo rõ "Namecheap giới hạn tốc
+  độ — đợi ~2 phút rồi thử lại" (ô chẩn đoán hiện lỗi đỏ, cách sửa
+  xanh). Loat Setup (theo danh sách / đã chọn) **tự dừng** khi gặp
+  lỗi này để các domain sau không lỗi theo — đợi ~2 phút rồi chạy
+  lại chỉ những domain chưa xong. Mẹo: đừng chạy Kiểm tra tất cả +
+  Setup cùng lúc.
+- **Cửa sổ thông báo sau khi lệnh xong** — mỗi lệnh chạy xong (Setup,
+  Setup danh sách, Áp record, Áp HTTPS, Bypass cache, Xóa zone,
+  Kiểm tra, Setup email, Thêm domain) đều hiện cửa sổ thông báo tóm
+  tắt: xong bao nhiêu domain, bỏ qua bao nhiêu (đã set đủ), lỗi bao
+  nhiêu — kèm tên domain (vd "Setup email xong 3 domain: a.com,
+  b.com, c.com"). Bấm "Đóng" hoặc bấm ra ngoài để tắt.
 - **Thanh điều hướng dọc** — bên trái có 2 mục: **Setup domain** (cài đặt,
   preset record, HTTPS preset, setup theo danh sách, bảng quản lý) và
   **Setup email** (email preset, setup email theo danh sách, bảng email).

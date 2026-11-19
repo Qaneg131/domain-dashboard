@@ -10,12 +10,25 @@ WHITELIST IP may chay tool (ClientIp). IP doi (mang dong) thi phai
 whitelist lai — xem nut 'Lay IP hien tai' o giao dien.
 """
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
 PROD = "https://api.namecheap.com/xml.response"
+
+# Namecheap API gioi han toc do kha chat (goi don nhieu domain lien
+# tuc la dinh "Too many requests" / "throttling"). Khi dinh gioi han
+# thi doi roi thu lai: lan 1 doi 30s, lan 2 doi 60s, het luot thi bao
+# loi ro de nguoi dung doi ~2 phut roi chay lai. (Test dat
+# nc_api.NC_RETRY_WAITS = (0, 0) de khoi doi.)
+NC_RETRY_WAITS = (30, 60)
+
+
+def _is_rate_limit_msg(msg):
+    m = str(msg or "").lower()
+    return "too many requests" in m or "throttl" in m or "429" in m
 
 # TLD 2 cap pho bien (de tach SLD/TLD dung, vd a.co.uk -> SLD=a, TLD=co.uk).
 TWO_LEVEL_TLDS = {"co.uk", "org.uk", "me.uk", "com.au", "net.au", "org.au",
@@ -45,6 +58,23 @@ class NCClient:
         self.base = base
 
     def _call(self, command, **params):
+        """Goi API, tu thu lai khi dinh gioi han toc do (xem NC_RETRY_WAITS)."""
+        last = None
+        for attempt in range(len(NC_RETRY_WAITS) + 1):
+            try:
+                return self._call_once(command, **params)
+            except NCError as e:
+                last = e
+                if _is_rate_limit_msg(str(e)) and attempt < len(NC_RETRY_WAITS):
+                    time.sleep(NC_RETRY_WAITS[attempt])
+                    continue
+                if _is_rate_limit_msg(str(e)) and "giới hạn tốc độ" not in str(e):
+                    raise NCError(
+                        f"Namecheap giới hạn tốc độ ({e}) — đợi ~2 phút rồi thử lại")
+                raise
+        raise last
+
+    def _call_once(self, command, **params):
         q = {"ApiUser": self.user, "ApiKey": self.api_key, "UserName": self.user,
              "Command": command, "ClientIp": self.client_ip}
         q.update(params)

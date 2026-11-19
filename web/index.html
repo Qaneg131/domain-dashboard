@@ -366,6 +366,8 @@ function diagnoseOne(text) {
   let m = t.match(/Invalid request IP: ([\d.]+)/);
   if (m) return { error: `Namecheap từ chối vì IP ${m[1]} chưa được whitelist (lỗi 1011150).`,
     fix: `Vào Namecheap → Profile → Tools → API Access → Whitelisted IPs → thêm ${m[1]}. Đồng thời sửa ô "Client IP" trong mục Cài đặt thành ${m[1]} (hoặc bấm "Lấy IP hiện tại"). Nếu IP hay đổi (đang bật Cloudflare WARP/VPN) thì tắt WARP lúc chạy Setup, hoặc whitelist lại IP mới mỗi lần.` };
+  if (/too many requests|throttl|giới hạn tốc độ/i.test(t)) return { error: 'Namecheap giới hạn tốc độ (Too many requests) — gọi API dồn quá nhiều domain cùng lúc.',
+    fix: 'Đợi ~2 phút rồi bấm Setup lại CHỈ domain này (không cần chạy lại hết). Bản tool mới đã tự đợi rồi thử lại 2 lần, và loat setup sẽ tự dừng khi gặp lỗi này để các domain sau không lỗi theo. Tránh chạy Kiểm tra tất cả + Setup cùng lúc.' };
   if (/active zone required/i.test(t)) return { error: 'Zone chưa active nên Cloudflare không cho bật Email Routing (không phải thiếu quyền).',
     fix: 'Đợi Cloudflare kích hoạt zone (thường vài phút sau khi NS lan truyền) rồi bấm Setup lại — các bước đã xong sẽ tự bỏ qua. Bản tool mới cũng tự đợi tối đa 5 phút trước khi báo lỗi này.' };
   if (/Non-Cloudflare MX records exist/i.test(t)) return { error: 'Cloudflare không bật được Email Routing vì domain còn MX của nhà cung cấp mail cũ.',
@@ -575,6 +577,7 @@ async function setupBatch() {
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
+  if (res.rate_limited) log('Dừng sớm do Namecheap giới hạn tốc độ — đợi ~2 phút rồi chạy lại các domain còn lại (chỉ những domain chưa xong).');
   notifyResults('Setup danh sách xong', res.results || []);
 }
 async function addBatchToManaged() {
@@ -1004,6 +1007,7 @@ async function setupSelected() {
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
+  if (res.rate_limited) log('Dừng sớm do Namecheap giới hạn tốc độ — đợi ~2 phút rồi chạy lại các domain còn lại (chỉ những domain chưa xong).');
   notifyResults('Setup đã chọn xong', res.results || []);
 }
 async function applyHttpsSelected() {
