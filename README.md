@@ -94,19 +94,36 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   410 domain nữa (Cloudflare giới hạn ~1200 request/5 phút nên quet
   1 lần là dính 429). Nó kiểm tra **30 domain/lần, xong loat thì tự
   động tiếp loat sau** (nghỉ 5s giữa các loat), có thanh tiến độ và nút
-  **Dừng**. Dính 429 thì dừng ngay, đợi ~5 phút rồi bấm lại để **tiếp
-  tục từ chỗ dừng** (không kiểm tra lại từ đầu). Domain nào cần gấp thì
+  **Dừng**. Chỉ kiểm tra domain **chưa có trạng thái** — domain đã
+  kiểm tra thì bỏ qua (trạng thái lưu sẵn trên server nên mở lại trang
+  hay bấm lại nút đều tiếp tục từ chỗ dừng, vd đã có 60/410 thì kiểm
+  tra từ 61, không quét lại từ đầu). Dính 429 thì dừng ngay, đợi ~5
+  phút rồi bấm lại để **tiếp tục từ chỗ dừng**. Domain nào cần gấp thì
   tự kiểm tra ưu tiên: tick ô vuông rồi bấm "Kiểm tra đã chọn" (bảng
-  quản lý) hoặc "Kiểm tra trang này" (tab mail). Mỗi lần kiểm tra 1
-  domain giờ chỉ còn ~5 call Cloudflare (HTTPS đọc 1 lần qua endpoint
-  /settings bulk thay vì 4 lần; Namecheap chỉ gọi khi DoH chưa xác
-  nhận NS) nên ít dính 429 hơn.
+  quản lý) hoặc "Kiểm tra trang này" (tab mail). Tốc độ mỗi domain đã
+  ở mức an toàn (5 call Cloudflare/domain, ~1.8s/domain — nhanh hơn
+  nữa sẽ vượt giới hạn 1200 request/5 phút của Cloudflare nên không
+  song song hóa thêm). Mỗi lần kiểm tra 1 domain giờ chỉ còn ~5 call
+  Cloudflare (HTTPS đọc 1 lần qua endpoint /settings bulk thay vì
+  4 lần; Namecheap chỉ gọi khi DoH chưa xác nhận NS) nên ít dính 429
+  hơn.
+- **Thanh điều hướng dọc** — bên trái có 2 mục: **Setup domain** (cài đặt,
+  preset record, HTTPS preset, setup theo danh sách, bảng quản lý) và
+  **Setup email** (email preset, setup email theo danh sách, bảng email).
+  Log chạy chung ở dưới cùng, lúc nào cũng thấy.
+- **Setup email theo danh sách** — ở mục Setup email có ô nhập nhiều
+  domain (mỗi dòng 1 domain), bấm Setup email: tool kiểm tra từng
+  domain, domain nào đã set đủ (Email Routing đã bật + rule đã có theo
+  preset) thì **bỏ qua**, chưa set thì setup; zone pending thì bỏ qua
+  luôn (không đợi 5 phút như nút setup lẻ). Có nút thêm các domain đó
+  vào bảng quản lý.
 - **Tab Setup email** — hiện hết domain đang quản lý (không chỉ
   active), mỗi dòng có cột **DNS** (zone active/pending + NS, lấy từ
   danh sách tài khoản nên thấy ngay), Routing status, DNS records
   (Locked/Unlocked) và nút Setup email (zone pending thì khóa nút).
   Phân trang **10 domain/trang**, tick checkbox để chọn nhiều domain
-  rồi bấm **"Setup email đã chọn"** setup 1 lần. Không còn nút Setup
+  rồi bấm **"Setup email đã chọn"** setup 1 lần. Mỗi cột DNS / Routing
+  status / DNS records có **bộ lọc riêng**. Không còn nút Setup
   email tất cả.
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".

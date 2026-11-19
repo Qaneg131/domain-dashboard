@@ -579,6 +579,33 @@ def apply_preset(domain, preset_name, cfg):
             {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": str(e)}]}
 
 
+_WRITE_MARKS = ("da tao", "da cap nhat", "da them", "da xoa")
+
+
+def _setup_email_one(d, cfg):
+    """Setup email cho 1 domain (dung cho loat nhieu domain): zone chua
+    active thi BO QUA NGAY (khong doi 5 phut nhu nut Setup email le —
+    cho ca loat thi doi tung domain se rat lau). Tra ve dict nhu
+    /api/setup-email, them co 'already_set' — True khi khong co buoc
+    nao ghi gi (routing da bat + tat ca rule da co san)."""
+    cf, zone, err = _get_zone_or_error(d, cfg)
+    if err:
+        return {"domain": d, "ok": False, "steps": [
+            {"step": "Tim zone", "ok": False, "detail": err}]}
+    if (zone.get("status") or "") != "active":
+        return {"domain": d, "ok": False, "steps": [
+            {"step": "Email routing", "ok": False,
+             "detail": "zone chua active — doi Cloudflare kich hoat roi chay lai"}]}
+    steps, ok = _apply_email_preset(d, cfg, cf, zone)
+    rule_steps = [s for s in steps
+                  if str(s.get("step", "")).startswith("Rule ")]
+    already = ok and bool(rule_steps) and not any(
+        any(m in s.get("detail", "") for m in _WRITE_MARKS)
+        or s.get("step") == "Bat Email Routing"
+        for s in steps)
+    return {"domain": d, "ok": ok, "steps": steps, "already_set": already}
+
+
 def _is_rate_limited(st):
     """Trang thai check co dinh gioi han toc do khong — 429 cua
     Cloudflare o bat ky buoc nao, hoac Namecheap bao throttling."""
@@ -844,6 +871,32 @@ class Handler(BaseHTTPRequestHandler):
                 st[d] = check_domain(d, cfg)
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "steps": steps})
+            elif path == "/api/setup-email-batch":
+                # Setup email cho nhieu domain 1 lan (o nhap o tab Setup
+                # email): domain nao da set du (routing da bat + rule da
+                # co san) thi bo qua, chua set thi setup. Dung ngay khi
+                # gap 429 de khong dot tiep.
+                domains = []
+                for x in (body.get("domains") or []):
+                    x = str(x).strip().lower()
+                    if x and x not in domains:
+                        domains.append(x)
+                results = []
+                for d in domains:
+                    r = _setup_email_one(d, cfg)
+                    results.append(r)
+                    st[d] = check_domain(d, cfg)
+                    if any("429" in str(s.get("detail", ""))
+                           for s in r.get("steps", [])):
+                        results.append({"domain": "(con lai)", "ok": False,
+                                        "steps": [{"step": "Dung loat",
+                                                   "ok": False, "detail":
+                                                   "Cloudflare gioi han toc do (429) — "
+                                                   "doi vai phut roi chay tiep"}]})
+                        break
+                    time.sleep(0.5)
+                save_status(st)
+                self._json({"ok": True, "results": results})
             elif path == "/api/sync-ns":
                 d = str(body.get("domain", "")).strip().lower()
                 cf, zone, err = _get_zone_or_error(d, cfg)

@@ -766,6 +766,30 @@ def main():
                                      "dns2.registrar-servers.com"], st30b
     print("  OK", flush=True)
 
+    print("TEST 31: _setup_email_one — da set thi already_set, pending thi bo qua ngay...", flush=True)
+    z15, _c = cf.get_or_create_zone("emailbatch.com")
+    r31 = dash._setup_email_one("emailbatch.com", cfg6)
+    assert r31["ok"] and not r31.get("already_set"), r31
+    r31b = dash._setup_email_one("emailbatch.com", cfg6)
+    assert r31b["ok"] and r31b.get("already_set"), r31b
+    # Xoa 1 rule thuong -> lan sau phai tao lai, khong phai already_set.
+    rules31 = cf.list_email_rules(z15["id"])
+    non_ca = [r for r in rules31
+              if not (r.get("matchers") and r["matchers"][0].get("type") == "all")]
+    assert non_ca, rules31
+    cf.delete_email_rule(z15["id"], non_ca[0]["id"])
+    r31c = dash._setup_email_one("emailbatch.com", cfg6)
+    assert r31c["ok"] and not r31c.get("already_set"), r31c
+    # Zone pending -> bo qua ngay, khong doi 5 phut.
+    z16, _c = cf.get_or_create_zone("emailpend.com")
+    STATE["zones"]["emailpend.com"]["status"] = "pending"
+    r31d = dash._setup_email_one("emailpend.com", cfg6)
+    assert not r31d["ok"] and "chua active" in r31d["steps"][0]["detail"], r31d
+    # Khong co zone.
+    r31e = dash._setup_email_one("nozone-x.com", cfg6)
+    assert not r31e["ok"], r31e
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

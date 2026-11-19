@@ -207,6 +207,15 @@ def main():
     assert "batch1.com" in chk2["status"], chk2
     assert chk2["status"]["batch1.com"]["zone"]["status"] == "active", chk2
     print("AUTO-MERGE + CHECK-BATCH OK: het zone vao bang, check theo loat", flush=True)
+
+    # Setup email theo danh sach: da set thi bo qua, chua set thi setup.
+    eb = call("POST", "/api/setup-email-batch",
+              {"domains": ["batch1.com", "nozone-x.com"]})
+    assert eb["ok"], eb
+    by_d = {r["domain"]: r for r in eb["results"]}
+    assert by_d["batch1.com"].get("already_set") is True, by_d
+    assert by_d["nozone-x.com"]["ok"] is False, by_d
+    print("SETUP-EMAIL-BATCH OK: da set thi bo qua, khong zone thi bao loi", flush=True)
     mock.shutdown()
     print("E2E OK")
 
