@@ -165,7 +165,9 @@ def main():
     assert gsc2["ok"] and gsc2["detail"] == "da co san", gsc2
     det6 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
     assert det6["gsc"] == "google-site-verification=gsc-test-123", det6.get("gsc")
+    assert det6["email"]["enabled"] is True and det6["email"]["dns_locked"] is True, det6["email"]
     print("GSC OK: them TXT @, trung thi giu, domain-detail hien dung", flush=True)
+    print("EMAIL TAB OK: routing Enabled + DNS records Locked hien dung", flush=True)
 
     # Tab Setup email: chi chay buoc email (da co san thi giu nguyen).
     se = call("POST", "/api/setup-email", {"domain": "batch1.com"})

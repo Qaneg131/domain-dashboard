@@ -26,7 +26,8 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cf_api import CFClient, CFError, _is_gsc_record, expand_name
+from cf_api import (CFClient, CFError, _is_email_routing_record,
+                    _is_gsc_record, expand_name)
 from dns_check import doh_ns, my_ip
 from nc_api import NCClient, NCError
 from store import load_config, save_config, load_status, save_status, BASE_DIR
@@ -109,7 +110,8 @@ def check_domain(domain, cfg):
             try:
                 st["records"] = [{"id": r.get("id"), "type": r.get("type"),
                                   "name": r.get("name"), "content": r.get("content"),
-                                  "proxied": r.get("proxied")}
+                                  "proxied": r.get("proxied"),
+                                  "locked": bool(r.get("locked"))}
                                  for r in cf.list_records(st["zone"]["id"])]
                 preset = cfg.get("presets", {}).get(cfg.get("default_preset", ""), [])
                 if preset:
@@ -123,7 +125,8 @@ def check_domain(domain, cfg):
                 rules = cf.list_email_rules(st["zone"]["id"])
                 st["email"] = {"enabled": bool(er.get("enabled")),
                                "status": er.get("status"),
-                               "rules": len(rules)}
+                               "rules": len(rules),
+                               "dns_locked": _email_records_locked(st.get("records"))}
             except Exception as e:
                 st["email"] = {"enabled": False, "status": None, "rules": 0,
                                "error": str(e)}
@@ -228,6 +231,13 @@ def _wait_zone_active(domain, cf, zone):
         if cur.get("status") == "active":
             return True, waited
     return False, waited
+
+
+def _email_records_locked(records):
+    """DNS records cua Email Routing co dang khoa (Locked) khong.
+    Cloudflare khoa 3 MX + SPF + DKIM khi bat routing."""
+    return any(_is_email_routing_record(r) and r.get("locked")
+               for r in records or [])
 
 
 # ------------------------------------------------- Google Search Console

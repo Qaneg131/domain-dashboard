@@ -144,6 +144,7 @@
       <button id="tabManaged" onclick="showDomainTab('managed')">Danh sách quản lý</button>
       <button class="secondary" id="tabAccount" onclick="showDomainTab('account')">Tất cả trong tài khoản</button>
       <button class="secondary" id="tabEmail" onclick="showDomainTab('email')">Setup email</button>
+      <button class="secondary" onclick="openGscModal()">Google Search Console</button>
     </div>
     <div id="managedTab">
     <div class="row">
@@ -192,8 +193,8 @@
       </div>
       <p class="hint">Chỉ hiện domain có zone đã <b>active</b> — zone pending thì Cloudflare không cho bật Email Routing. Bấm "Setup email" để bật Email Routing + áp rule theo email preset.</p>
       <table>
-        <thead><tr><th>Name</th><th>Zone</th><th>Email routing</th><th></th></tr></thead>
-        <tbody id="emailTable"><tr><td colspan="4" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr></tbody>
+        <thead><tr><th>Name</th><th>Zone</th><th>Routing status</th><th>DNS records</th><th></th></tr></thead>
+        <tbody id="emailTable"><tr><td colspan="5" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -282,6 +283,24 @@
       <span class="muted" id="editGscMsg"></span>
     </div>
     <div class="muted" id="editGscCurrent"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="gscModal" onclick="if (event.target === this) closeGscModal()">
+  <div class="modal">
+    <button class="secondary small close" onclick="closeGscModal()">Đóng ✕</button>
+    <h2>Google Search Console</h2>
+    <p class="hint">Xác minh domain với Google Search Console bằng record TXT @. Mã xác minh phải lấy tay từ Search Console (tool không tự lấy được) rồi dán vào đây. Record này được giữ lại khi áp preset / Setup.</p>
+    <div class="row">
+      <label>Domain</label>
+      <select id="gscDomain" onchange="loadGscCurrent()"></select>
+    </div>
+    <div class="row">
+      <input type="text" id="gscValue" placeholder="google-site-verification=...">
+      <button class="secondary small" onclick="saveGscModal()">Thêm record TXT</button>
+      <span class="muted" id="gscMsg"></span>
+    </div>
+    <div class="muted" id="gscCurrent"></div>
   </div>
 </div>
 <script>
@@ -545,22 +564,25 @@ function renderEmailTab() {
     `${active.length} domain active / ${domains.length} domain quản lý` +
     (pending ? ` (${pending} domain chưa active nên không hiện ở đây)` : '');
   if (!checked.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr>';
+    tb.innerHTML = '<tr><td colspan="5" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr>';
     return;
   }
   if (!active.length) {
-    tb.innerHTML = '<tr><td colspan="4" class="muted">Chưa có domain nào active — đợi Cloudflare kích hoạt zone rồi bấm "Kiểm tra trạng thái" lại.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="5" class="muted">Chưa có domain nào active — đợi Cloudflare kích hoạt zone rồi bấm "Kiểm tra trạng thái" lại.</td></tr>';
     return;
   }
   tb.innerHTML = active.map(d => {
     const s = STATE.status[d];
     const em = s.email || {};
-    const emTxt = em.error ? `<span class="badge no">No</span> <span class="muted">lỗi: ${esc(em.error)}</span>`
-      : em.enabled ? `<span class="badge ok">Yes</span> ${em.rules || 0} rule`
-      : '<span class="badge no">No</span>';
+    const routing = em.error ? `<span class="badge no">No</span> <span class="muted">lỗi</span>`
+      : em.enabled ? `<span class="badge ok">● Enabled</span> ${em.rules || 0} rule`
+      : '<span class="badge no">Disabled</span>';
+    const dnsLock = em.dns_locked ? '<span class="badge ok">● Locked</span>'
+      : '<span class="muted">Unlocked</span>';
     return `<tr><td><b>${esc(d)}</b></td>
       <td><span class="badge ok">active</span></td>
-      <td>${emTxt}</td>
+      <td>${routing}</td>
+      <td>${dnsLock}</td>
       <td><button class="small" onclick="setupEmailOne('${esc(d)}')">Setup email</button></td></tr>`;
   }).join('');
 }
@@ -903,6 +925,37 @@ async function saveGsc() {
     const shown = v.toLowerCase().startsWith('google-site-verification=')
       ? v : 'google-site-verification=' + v;
     document.getElementById('editGscCurrent').textContent = 'Đang có: ' + shown;
+    await refresh();
+  }
+}
+// ---------------------------------------------------------------- popup GSC rieng
+// Nut "Google Search Console" o ngoai (khong can mo Edit) — chon domain,
+// dan ma, them record TXT @.
+function openGscModal() {
+  const sel = document.getElementById('gscDomain');
+  sel.innerHTML = (STATE.config.domains || []).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  document.getElementById('gscModal').classList.add('open');
+  loadGscCurrent();
+}
+function closeGscModal() { document.getElementById('gscModal').classList.remove('open'); }
+async function loadGscCurrent() {
+  const d = document.getElementById('gscDomain').value;
+  if (!d) return;
+  const det = await api('/api/domain-detail', { domain: d });
+  document.getElementById('gscValue').value = det.gsc || '';
+  document.getElementById('gscCurrent').textContent = det.gsc ? 'Đang có: ' + det.gsc : 'Chưa có record xác minh.';
+  document.getElementById('gscMsg').textContent = '';
+}
+async function saveGscModal() {
+  const d = document.getElementById('gscDomain').value;
+  const v = document.getElementById('gscValue').value.trim();
+  if (!d || !v) { document.getElementById('gscMsg').textContent = 'Chưa chọn domain hoặc chưa nhập mã.'; return; }
+  const res = await api('/api/gsc', { domain: d, value: v });
+  document.getElementById('gscMsg').textContent = res.ok ? res.detail : ('Lỗi: ' + (res.detail || ''));
+  if (res.ok) {
+    const shown = v.toLowerCase().startsWith('google-site-verification=')
+      ? v : 'google-site-verification=' + v;
+    document.getElementById('gscCurrent').textContent = 'Đang có: ' + shown;
     await refresh();
   }
 }

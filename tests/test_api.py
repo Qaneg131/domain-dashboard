@@ -219,7 +219,8 @@ class MockHandler(BaseHTTPRequestHandler):
                                       ("TXT", "cf2024-1._domainkey", "v=DKIM1; p=mock")]:
                         STATE["records"][zid].append(
                             {"id": f"rec-{STATE['next_id']}", "type": t, "name": nm,
-                             "content": ct, "proxied": False, "ttl": 1})
+                             "content": ct, "proxied": False, "ttl": 1,
+                             "locked": True})  # API that khoa record email
                         STATE["next_id"] += 1
                     self._json(self._cf_ok({"enabled": True, "status": "ready"}))
                     return
@@ -694,6 +695,18 @@ def main():
     g3 = [r for r in cf.list_records(z10["id"])
           if r["type"] == "TXT" and "google-site-verification" in r["content"]]
     assert len(g3) == 1 and g3[0]["content"] == "google-site-verification=xyz999", g3
+    print("  OK", flush=True)
+
+    print("TEST 27: tab Setup email — check_domain tra ve routing + dns_locked...", flush=True)
+    z11, _c = cf.get_or_create_zone("emailtab.com")
+    st27 = dash.check_domain("emailtab.com", cfg6)
+    assert st27["email"]["enabled"] is False, st27["email"]
+    assert st27["email"]["dns_locked"] is False, st27["email"]
+    dash._apply_email_preset("emailtab.com", cfg6, cf, {"id": z11["id"], "status": "active"})
+    st27b = dash.check_domain("emailtab.com", cfg6)
+    assert st27b["email"]["enabled"] is True, st27b["email"]
+    assert st27b["email"]["dns_locked"] is True, st27b["email"]
+    assert st27b["email"]["rules"] == 2, st27b["email"]
     print("  OK", flush=True)
 
     srv.shutdown()

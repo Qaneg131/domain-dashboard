@@ -65,13 +65,17 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
 - **Tab "Setup email"** — chỉ hiện domain có zone đã **active** (zone pending
   thì Cloudflare không cho bật Email Routing nên không cho set ở đây). Mỗi
-  dòng có nút "Setup email" (chỉ chạy bước Email Routing: bật routing +
-  áp rule theo email preset) và nút "Setup email tất cả (active)".
-- **Google Search Console** — mục riêng trong popup Edit: dán mã xác minh
-  lấy tay từ Search Console, bấm "Thêm record TXT" để thêm record TXT @
-  `google-site-verification=...` (nhập tay, tool không tự lấy được; dán
-  cả mã đầy đủ hoặc chỉ phần mã đều được). Record này được giữ lại khi
-  áp preset / Setup, không bị xóa cùng record cũ.
+  dòng hiện đủ 2 trạng thái như trên Cloudflare: **Routing status**
+  (Enabled/Disabled + số rule) và **DNS records** (Locked khi record MX/SPF/
+  DKIM của Email Routing đang bị khóa, Unlocked khi chưa). Mỗi dòng có nút
+  "Setup email" (chỉ chạy bước Email Routing: bật routing + áp rule theo
+  email preset) và nút "Setup email tất cả (active)".
+- **Google Search Console** — mục riêng trong popup Edit, và nút riêng
+  ngoài trang (cạnh các tab) bấm là mở popup mới: chọn domain, dán mã
+  xác minh lấy tay từ Search Console, bấm "Thêm record TXT" để thêm
+  record TXT @ `google-site-verification=...` (nhập tay, tool không tự
+  lấy được; dán cả mã đầy đủ hoặc chỉ phần mã đều được). Record này được
+  giữ lại khi áp preset / Setup, không bị xóa cùng record cũ.
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo
