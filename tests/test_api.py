@@ -976,6 +976,54 @@ def main():
     assert st38b["records_preset"] is None and st38b["records_ok"] is False, st38b
     print("  OK", flush=True)
 
+    print("TEST 39: _sync_records — xung dot CNAME + setup_domain dung preset duoc chon (khong phai mac dinh)...", flush=True)
+    # (a) Domain co CNAME @, preset muon A @ -> xoa CNAME truoc roi tao A.
+    z39, _c = cf.get_or_create_zone("cname39.com")
+    cf.create_record(z39["id"], "CNAME", "cname39.com", "stores.sarivon.com", True)
+    d39, ok39 = dash._sync_records("cname39.com",
+        [{"type": "A", "name": "@", "content": "1.11.11.11", "proxied": True},
+         {"type": "A", "name": "www", "content": "1.11.11.11", "proxied": True}], cf, z39)
+    assert ok39, d39
+    r39 = cf.list_records(z39["id"])
+    assert not any(x["type"] == "CNAME" for x in r39), r39
+    assert any(x["type"] == "A" and x["content"] == "1.11.11.11" for x in r39), r39
+    # (b) Domain co A @, preset muon CNAME @ -> xoa A truoc roi tao CNAME.
+    z39b, _c = cf.get_or_create_zone("cname39b.com")
+    cf.create_record(z39b["id"], "A", "cname39b.com", "1.11.11.11", True)
+    d39b, ok39b = dash._sync_records("cname39b.com",
+        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39b)
+    assert ok39b, d39b
+    r39b = cf.list_records(z39b["id"])
+    assert not any(x["type"] == "A" for x in r39b), r39b
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in r39b), r39b
+    # (c) CNAME giong het thi giu, khong xoa.
+    z39c, _c = cf.get_or_create_zone("cname39c.com")
+    cf.create_record(z39c["id"], "CNAME", "cname39c.com", "stores.sarivon.com", True)
+    d39c, ok39c = dash._sync_records("cname39c.com",
+        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39c)
+    assert ok39c and "giu 1 record giong het" in d39c, d39c
+    assert len(cf.list_records(z39c["id"])) == 1
+    # (d) Record he thong Email Routing (MX) khong bi xoa khi preset muon CNAME @.
+    z39d, _c = cf.get_or_create_zone("cname39d.com")
+    cf.create_record(z39d["id"], "MX", "cname39d.com", "route1.mx.cloudflare.net", False)
+    d39d, ok39d = dash._sync_records("cname39d.com",
+        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39d)
+    r39d = cf.list_records(z39d["id"])
+    assert any(x["type"] == "MX" and "mx.cloudflare.net" in x["content"] for x in r39d), r39d
+    # (e) setup_domain dung preset duoc truyen vao, khong phai mac dinh.
+    cfg39 = dict(cfg)
+    cfg39["presets"] = dict(cfg["presets"])
+    cfg39["presets"]["Web Long"] = [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}]
+    cfg39["default_preset"] = "web"
+    STATE["nc_ns"]["long39.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    res39 = dash.setup_domain("long39.com", "Web Long", cfg39)
+    assert res39["ok"], res39
+    assert any(s["step"] == "Ap preset 'Web Long'" and s["ok"] for s in res39["steps"]), res39["steps"]
+    st39 = dash.check_domain("long39.com", cfg39)
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in st39["records"]), st39
+    assert st39["records_preset"] == "Web Long", st39
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

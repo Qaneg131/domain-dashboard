@@ -110,6 +110,7 @@
       <button class="secondary small" onclick="setDefaultPreset()">Đặt làm mặc định</button>
       <button class="warn small" onclick="deletePreset()">Xóa preset</button>
       <span class="muted" id="presetDefaultLabel"></span>
+      <span class="hint">Setup / Áp record sẽ dùng preset đang chọn ở đây.</span>
     </div>
     <div id="presetRows"></div>
     <div class="row">
@@ -461,6 +462,11 @@ function loadPresetIntoEditor() {
   const name = document.getElementById('presetSelect').value;
   presetEditorRows((STATE.config.presets || {})[name] || []);
 }
+function setupPreset() {
+  // Preset Setup / Ap record se dung = preset dang chon o muc Preset
+  // record (dropdown), chu khong phai luc nao cung preset mac dinh.
+  return document.getElementById('presetSelect').value || STATE.config.default_preset || '';
+}
 function editorRecords() {
   return [...document.querySelectorAll('#presetRows .preset-row')].map(row => ({
     type: row.querySelector('.p-type').value,
@@ -572,9 +578,9 @@ function batchDomainList() {
 async function setupBatch() {
   const domains = batchDomainList();
   if (!domains.length) { alert('Chưa nhập domain nào vào ô danh sách.'); return; }
-  if (!confirm(`Setup ${domains.length} domain:\n${domains.join('\n')}\n\nMỗi domain: check DNS → đổi NS (nếu cần) → áp preset record → email routing.`)) return;
+  if (!confirm(`Setup ${domains.length} domain:\n${domains.join('\n')}\n\nMỗi domain: check DNS → đổi NS (nếu cần) → áp preset record "${setupPreset() || 'chưa có'}" → email routing.`)) return;
   log(`Đang setup ${domains.length} domain… (mỗi domain có thể mất ~1 phút)`);
-  const res = await api('/api/setup-batch', { domains });
+  const res = await api('/api/setup-batch', { domains, preset: setupPreset() });
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
@@ -839,9 +845,9 @@ async function setupEmailSelected() {
 async function setupSelected() {
   const domains = selectedDomains();
   if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
-  if (!confirm(`Setup ${domains.length} domain đã chọn?`)) return;
+  if (!confirm(`Setup ${domains.length} domain đã chọn với preset "${setupPreset() || 'chưa có'}"?`)) return;
   log(`Đang setup ${domains.length} domain…`);
-  const res = await api('/api/setup-batch', { domains });
+  const res = await api('/api/setup-batch', { domains, preset: setupPreset() });
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
@@ -863,7 +869,7 @@ async function applyHttpsSelected() {
 async function applyRecordsSelected() {
   const domains = selectedDomains();
   if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
-  const preset = STATE.config.default_preset || 'web';
+  const preset = setupPreset() || 'web';
   if (!confirm(`Áp preset record "${preset}" cho ${domains.length} domain đã chọn? (xóa hết record cũ của từng domain rồi thêm mới)`)) return;
   log(`Đang áp preset "${preset}" cho ${domains.length} domain…`);
   const res = await api('/api/apply-records-batch', { domains, preset });
@@ -1313,9 +1319,9 @@ async function checkDnsFast() {
   }
 }
 async function setupOne(d) {
-  if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset mặc định (${STATE.config.default_preset || 'chưa có'})`)) return;
+  if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset "${setupPreset() || 'chưa có'}"`)) return;
   log(`Đang setup ${d}… (có thể mất ~1 phút nếu đợi DNS lan truyền)`);
-  const res = await api('/api/setup', { domain: d });
+  const res = await api('/api/setup', { domain: d, preset: setupPreset() });
   log(fmtSteps(res));
   showDiagnosis([res]);
   await refresh();
@@ -1324,8 +1330,8 @@ async function setupOne(d) {
            : `Domain <b>${esc(d)}</b> chưa setup xong — xem log bên dưới để biết bước nào lỗi.`);
 }
 async function applyPreset(d) {
-  const preset = STATE.config.default_preset;
-  if (!preset) { alert('Chưa có preset mặc định.'); return; }
+  const preset = setupPreset();
+  if (!preset) { alert('Chưa có preset nào — chọn preset ở mục Preset record rồi thử lại.'); return; }
   if (!confirm(`Áp preset "${preset}" cho ${d}? (xóa hết record cũ rồi thêm mới)`)) return;
   log(`Đang áp preset "${preset}" cho ${d}…`);
   const res = await api('/api/apply-preset', { domain: d, preset });

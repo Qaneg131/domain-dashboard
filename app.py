@@ -466,16 +466,23 @@ def _sync_records(domain, records, cf, zone):
     - record cung type+name nhung khac content/proxied -> xoa cai cu
       roi them moi (day la 'record trung')
     - record khac (khong nam trong danh sach) -> GIU NGUYEN
+    - xung dot CNAME: 1 ten khong the vua co CNAME vua co record loai
+      khac — preset muon CNAME o ten X thi xoa cac record khac loai o X
+      truoc, preset muon record thuong o ten X ma dang co CNAME o X thi
+      xoa CNAME do truoc (khong xoa record he thong Email Routing / GSC;
+      neu chung chan thi create se loi ro rang).
     Tra ve (detail, ok). Dung cho Setup, Ap record, Ap record loat."""
     try:
         existing = cf.list_records(zone["id"])
         by_key = {}
+        by_name = {}
         for r in existing:
             # Chuan hoa ten ve FQDN (API that tra ten day du; mock tra
             # ten ngan '@'/'www') de so sanh khop voi preset.
-            by_key.setdefault(((r.get("type") or "").upper(),
-                               expand_name(domain, r.get("name") or "").lower()),
-                              []).append(r)
+            k = ((r.get("type") or "").upper(),
+                 expand_name(domain, r.get("name") or "").lower())
+            by_key.setdefault(k, []).append(r)
+            by_name.setdefault(k[1], []).append(r)
         kept = updated = added = deleted = 0
         for r in records:
             typ = str(r.get("type", "A")).upper()
@@ -485,6 +492,19 @@ def _sync_records(domain, records, cf, zone):
             if not content:
                 continue
             key = (typ, name.lower())
+            for x in list(by_name.get(name.lower(), [])):
+                xtype = (x.get("type") or "").upper()
+                if xtype == typ:
+                    continue  # cung loai — xu ly o phan gop ben duoi
+                if typ == "CNAME" or xtype == "CNAME":
+                    if _is_email_routing_record(x) or _is_gsc_record(x):
+                        continue  # bao ve — khong xoa ngam
+                    cf.delete_record(zone["id"], x["id"])
+                    deleted += 1
+                    by_name[name.lower()].remove(x)
+                    old_key = (xtype, name.lower())
+                    if x in by_key.get(old_key, []):
+                        by_key[old_key].remove(x)
             cur = by_key.get(key, [])
             same = [x for x in cur
                     if str(x.get("content", "")).strip() == content
