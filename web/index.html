@@ -44,6 +44,7 @@
   .stat { display: inline-flex; align-items: center; padding: 5px 11px; border-radius: 20px; font-size: 13px; font-weight: 600; background: #f5f2ed; color: #4c463e; border: 1px solid #e3ddd2; white-space: nowrap; }
   .stat:empty { display: none; }
   .stat.err { background: #fdecea; color: #b3261e; border-color: #f3c1bd; }
+  .stat.current { background: #fdf6ec; border-color: #cf9a5f; color: #16130f; font-weight: 700; }
   /* Thanh thao tac hang loat: noi bat khi co domain duoc chon, nut nguy hiem tach rieng ben phai. */
   .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #f5f2ed; border: 1px solid #e8e1d5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .bulkbar.has-sel { background: #fdf6ec; border-color: #cf9a5f; }
@@ -106,6 +107,7 @@
     <h2>Preset record — lưu cấu hình để áp nhanh</h2>
     <div class="row">
       <select id="presetSelect" onchange="loadPresetIntoEditor()"></select>
+      <span class="stat current" id="presetCurrentBadge"></span>
       <button class="secondary small" onclick="newPreset()">Preset mới</button>
       <button class="secondary small" onclick="setDefaultPreset()">Đặt làm mặc định</button>
       <button class="warn small" onclick="deletePreset()">Xóa preset</button>
@@ -228,7 +230,14 @@
 </main>
 </div>
 
-<div class="modal-bg" id="notifyModal" onclick="if (event.target === this) closeNotify()">
+<div class="modal-bg" id="choiceModal">
+    <div class="modal" style="max-width:540px">
+      <h2 id="choiceTitle"></h2>
+      <div id="choiceBody" style="margin:10px 0 16px; line-height:1.7"></div>
+      <div class="row" id="choiceButtons" style="justify-content:flex-end; margin-bottom:0"></div>
+    </div>
+  </div>
+  <div class="modal-bg" id="notifyModal" onclick="if (event.target === this) closeNotify()">
   <div class="modal" style="max-width:520px">
     <button class="secondary small close" onclick="closeNotify()">Đóng ✕</button>
     <h2 id="notifyTitle"></h2>
@@ -460,7 +469,45 @@ function addPresetRow(r) {
 }
 function loadPresetIntoEditor() {
   const name = document.getElementById('presetSelect').value;
+  const badge = document.getElementById('presetCurrentBadge');
+  if (badge) badge.textContent = 'Đang chọn: ' + (name || '(chưa có)');
   presetEditorRows((STATE.config.presets || {})[name] || []);
+}
+function askChoice(title, bodyHtml, buttons) {
+  // Modal hoi lua chon, tra ve Promise<gia tri nut duoc bam | null>.
+  // buttons: [{label, value, cls}] — cls 'secondary' cho nut phu.
+  return new Promise(resolve => {
+    const bg = document.getElementById('choiceModal');
+    document.getElementById('choiceTitle').textContent = title;
+    document.getElementById('choiceBody').innerHTML = bodyHtml;
+    const box = document.getElementById('choiceButtons');
+    box.innerHTML = '';
+    const done = v => { bg.classList.remove('open'); bg.onclick = null; resolve(v); };
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      btn.textContent = b.label;
+      if (b.cls) btn.className = b.cls;
+      btn.onclick = () => done(b.value);
+      box.appendChild(btn);
+    });
+    bg.onclick = e => { if (e.target === bg) done(null); };
+    bg.classList.add('open');
+  });
+}
+async function askPresetMismatch(domains, selected) {
+  // Domain da dung preset khac voi preset dang chon -> hoi co set lai
+  // record theo preset moi khong. Tra ve 'reapply' | 'skip' | null (huy).
+  const rows = domains.map(d => {
+    const cur = (STATE.status[d] || {}).records_preset || '(chưa kiểm tra)';
+    return `<div>• <b>${esc(d)}</b> — đang dùng: <b>${esc(cur)}</b></div>`;
+  }).join('');
+  return askChoice('Domain đã dùng preset khác',
+    `${rows}<p style="margin:10px 0 0">Preset đang chọn để Setup là <b>${esc(selected)}</b>. Bạn có muốn set lại record theo <b>${esc(selected)}</b> không?</p>`,
+    [
+      { label: `Set lại record theo '${selected}'`, value: 'reapply' },
+      { label: 'Giữ nguyên record — chỉ làm email + HTTPS', value: 'skip', cls: 'secondary' },
+      { label: 'Hủy', value: null, cls: 'secondary' },
+    ]);
 }
 function setupPreset() {
   // Preset Setup / Ap record se dung = preset dang chon o muc Preset
@@ -578,9 +625,19 @@ function batchDomainList() {
 async function setupBatch() {
   const domains = batchDomainList();
   if (!domains.length) { alert('Chưa nhập domain nào vào ô danh sách.'); return; }
-  if (!confirm(`Setup ${domains.length} domain:\n${domains.join('\n')}\n\nMỗi domain: check DNS → đổi NS (nếu cần) → áp preset record "${setupPreset() || 'chưa có'}" → email routing.`)) return;
+  const preset = setupPreset();
+  let skipList = [];
+  const mismatched = domains.filter(d => {
+    const cur = (STATE.status[d] || {}).records_preset;
+    return cur && cur !== preset;
+  });
+  if (mismatched.length) {
+    const choice = await askPresetMismatch(mismatched, preset);
+    if (choice === null) return;
+    if (choice === 'skip') skipList = mismatched;
+  } else if (!confirm(`Setup ${domains.length} domain:\n${domains.join('\n')}\n\nMỗi domain: check DNS → đổi NS (nếu cần) → áp preset record "${preset || 'chưa có'}" → email routing.`)) return;
   log(`Đang setup ${domains.length} domain… (mỗi domain có thể mất ~1 phút)`);
-  const res = await api('/api/setup-batch', { domains, preset: setupPreset() });
+  const res = await api('/api/setup-batch', { domains, preset, skip_records: skipList });
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
@@ -845,9 +902,19 @@ async function setupEmailSelected() {
 async function setupSelected() {
   const domains = selectedDomains();
   if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
-  if (!confirm(`Setup ${domains.length} domain đã chọn với preset "${setupPreset() || 'chưa có'}"?`)) return;
+  const preset = setupPreset();
+  let skipList = [];
+  const mismatched = domains.filter(d => {
+    const cur = (STATE.status[d] || {}).records_preset;
+    return cur && cur !== preset;
+  });
+  if (mismatched.length) {
+    const choice = await askPresetMismatch(mismatched, preset);
+    if (choice === null) return;
+    if (choice === 'skip') skipList = mismatched;
+  } else if (!confirm(`Setup ${domains.length} domain đã chọn với preset "${preset || 'chưa có'}"?`)) return;
   log(`Đang setup ${domains.length} domain…`);
-  const res = await api('/api/setup-batch', { domains, preset: setupPreset() });
+  const res = await api('/api/setup-batch', { domains, preset, skip_records: skipList });
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
@@ -1319,9 +1386,16 @@ async function checkDnsFast() {
   }
 }
 async function setupOne(d) {
-  if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset "${setupPreset() || 'chưa có'}"`)) return;
+  const preset = setupPreset();
+  let skipRecords = false;
+  const cur = (STATE.status[d] || {}).records_preset;
+  if (cur && cur !== preset) {
+    const choice = await askPresetMismatch([d], preset);
+    if (choice === null) return;
+    skipRecords = (choice === 'skip');
+  } else if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset "${preset || 'chưa có'}"`)) return;
   log(`Đang setup ${d}… (có thể mất ~1 phút nếu đợi DNS lan truyền)`);
-  const res = await api('/api/setup', { domain: d, preset: setupPreset() });
+  const res = await api('/api/setup', { domain: d, preset, skip_records: skipRecords });
   log(fmtSteps(res));
   showDiagnosis([res]);
   await refresh();

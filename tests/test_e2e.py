@@ -74,6 +74,17 @@ def main():
 
     assert call("POST", "/api/presets", {"name": "shop", "records": [
         {"type": "A", "name": "@", "content": "2.2.2.2", "proxied": True}]})["ok"]
+    # Luu preset trung het record voi preset 'shop' -> bi tu choi (400).
+    try:
+        call("POST", "/api/presets", {"name": "shop-copy", "records": [
+            {"type": "A", "name": "@", "content": "2.2.2.2", "proxied": True}]})
+        raise AssertionError("duplicated preset should be rejected")
+    except urllib.error.HTTPError as e:
+        dup = json.loads(e.read().decode())
+        assert e.code == 400 and "trung" in (dup.get("error") or ""), dup
+    # Sua lai 1 record thi luu duoc.
+    assert call("POST", "/api/presets", {"name": "shop-copy", "records": [
+        {"type": "A", "name": "@", "content": "3.3.3.3", "proxied": True}]})["ok"]
     res2 = call("POST", "/api/apply-preset", {"domain": "welvella.com", "preset": "shop"})
     print("APPLY shop:", res2["ok"], res2["steps"][0]["detail"], flush=True)
     assert res2["ok"], res2

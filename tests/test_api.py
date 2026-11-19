@@ -1024,6 +1024,41 @@ def main():
     assert st39["records_preset"] == "Web Long", st39
     print("  OK", flush=True)
 
+    print("TEST 40: _sync_records go record preset cu (1 domain 1 cau hinh) + setup_domain skip_records...", flush=True)
+    cfg40 = dict(cfg)
+    cfg40["presets"] = {
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "134.209.163.195", "proxied": True},
+                        {"type": "A", "name": "www", "content": "134.209.163.195", "proxied": True}],
+        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}],
+    }
+    cfg40["default_preset"] = "Web Chị Hân"
+    # (a) Domain dang dung 'Web Chi Han', ap 'Web Anh Long' -> A @ bi xoa
+    # do xung dot CNAME, A www bi go vi thuoc preset cu, record tu do + MX
+    # he thong duoc giu.
+    z40, _c = cf.get_or_create_zone("one40.com")
+    cf.create_record(z40["id"], "A", "one40.com", "134.209.163.195", True)
+    cf.create_record(z40["id"], "A", "www.one40.com", "134.209.163.195", True)
+    cf.create_record(z40["id"], "TXT", "blog.one40.com", "custom", False)
+    cf.create_record(z40["id"], "MX", "one40.com", "route1.mx.cloudflare.net", False)
+    other40 = dash._other_preset_keys("one40.com", cfg40, "Web Anh Long")
+    d40, ok40 = dash._sync_records("one40.com", cfg40["presets"]["Web Anh Long"], cf, z40, other40)
+    assert ok40, d40
+    assert "da go 1 record cua preset khac" in d40, d40
+    r40 = cf.list_records(z40["id"])
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in r40), r40
+    assert not any(x["type"] == "A" for x in r40), r40
+    assert any(x["type"] == "TXT" and x["content"] == "custom" for x in r40), r40
+    assert any(x["type"] == "MX" and "mx.cloudflare.net" in x["content"] for x in r40), r40
+    # (b) setup_domain skip_records=True: giu nguyen record, van lam email + HTTPS.
+    STATE["nc_ns"]["skip40.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    res40 = dash.setup_domain("skip40.com", "Web Anh Long", cfg40, skip_records=True)
+    assert res40["ok"], res40
+    step40 = [s for s in res40["steps"] if s["step"] == "Ap preset 'Web Anh Long'"]
+    assert len(step40) == 1 and step40[0]["ok"] and "bỏ qua" in step40[0]["detail"], res40["steps"]
+    z40b, _c = cf.get_or_create_zone("skip40.com")
+    assert cf.list_records(z40b["id"]) == [], cf.list_records(z40b["id"])
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

@@ -460,12 +460,32 @@ def _get_zone_or_error(domain, cfg):
     return cf, zone, None
 
 
-def _sync_records(domain, records, cf, zone):
+def _other_preset_keys(domain, cfg, preset_name):
+    """Tap (type, ten day du, content) cua cac record thuoc preset KHAC
+    preset dang ap — dung de go record sot lai cua preset cu khi doi cau
+    hinh (1 domain chi duoc co 1 cau hinh, khong de 2 preset chong len
+    nhau)."""
+    keys = set()
+    for name, recs in (cfg.get("presets") or {}).items():
+        if name == preset_name:
+            continue
+        for r in recs or []:
+            keys.add((str(r.get("type", "A")).upper(),
+                      expand_name(domain, r.get("name", "")).lower(),
+                      str(r.get("content", "")).strip()))
+    return keys
+
+
+def _sync_records(domain, records, cf, zone, other_keys=None):
     """Ap record theo kieu gop (merge), KHONG xoa het record cu.
     - record giong het (type+name+content+proxied) -> giu
     - record cung type+name nhung khac content/proxied -> xoa cai cu
       roi them moi (day la 'record trung')
-    - record khac (khong nam trong danh sach) -> GIU NGUYEN
+    - record khac (khong nam trong danh sach, khong thuoc preset nao)
+      -> GIU NGUYEN (record tu do)
+    - record thuoc preset KHAC (other_keys) -> GO, de 1 domain chi co 1
+      cau hinh (khong chong 2 preset); record he thong Email Routing /
+      GSC thi giu nguyen
     - xung dot CNAME: 1 ten khong the vua co CNAME vua co record loai
       khac — preset muon CNAME o ten X thi xoa cac record khac loai o X
       truoc, preset muon record thuong o ten X ma dang co CNAME o X thi
@@ -526,17 +546,37 @@ def _sync_records(domain, records, cf, zone):
                 updated += 1
             else:
                 added += 1
+        removed_other = 0
+        if other_keys:
+            new_keys = {(str(r.get("type", "A")).upper(),
+                         expand_name(domain, r.get("name", "")).lower(),
+                         str(r.get("content", "")).strip())
+                        for r in records if str(r.get("content", "")).strip()}
+            for x in cf.list_records(zone["id"]):
+                xk = ((x.get("type") or "").upper(),
+                      expand_name(domain, x.get("name") or "").lower(),
+                      str(x.get("content", "")).strip())
+                if xk in new_keys or xk not in other_keys:
+                    continue
+                if _is_email_routing_record(x) or _is_gsc_record(x):
+                    continue
+                cf.delete_record(zone["id"], x["id"])
+                removed_other += 1
         detail = (f"giu {kept} record giong het, cap nhat {updated}, "
-                  f"them {added} record moi, da xoa {deleted} record trung "
-                  "— cac record khac giu nguyen")
+                  f"them {added} record moi, da xoa {deleted} record trung"
+                  + (f", da go {removed_other} record cua preset khac"
+                     if removed_other else "") +
+                  " — cac record khac giu nguyen")
         return detail, True
     except Exception as e:
         return str(e), False
 
 
-def setup_domain(domain, preset_name, cfg):
+def setup_domain(domain, preset_name, cfg, skip_records=False):
     """Setup 1 domain: tao zone CF -> doi NS Namecheap -> ap preset record.
-    Tra ve {domain, ok, steps:[{step, ok, detail}]}."""
+    skip_records=True: giu nguyen record dang co (domain da dung preset
+    khac, user khong muon set lai) — bo qua buoc ap preset, di thang toi
+    email + HTTPS. Tra ve {domain, ok, steps:[{step, ok, detail}]}."""
     domain = domain.strip().lower()
     preset_name = preset_name or cfg.get("default_preset", "")
     steps = []
@@ -571,14 +611,18 @@ def setup_domain(domain, preset_name, cfg):
     # chi xoa record trung (cung type+name, khac noi dung), record khac
     # giu nguyen — tranh mat record tu do (vd domain 9 record, xoa het
     # roi ap lai chi con 7).
-    if preset_name:
+    if skip_records:
+        step(f"Ap preset '{preset_name}'", True,
+             "bỏ qua — giữ nguyên record đang có")
+    elif preset_name:
         preset = cfg.get("presets", {}).get(preset_name)
         if not preset:
             step(f"Ap preset '{preset_name}'", False,
                  f"preset '{preset_name}' khong ton tai — vao muc Preset "
                  "record de tao/chon preset mac dinh roi Setup lai")
             return {"domain": domain, "ok": False, "steps": steps}
-        detail, ok3 = _sync_records(domain, preset, cf, zone)
+        detail, ok3 = _sync_records(domain, preset, cf, zone,
+                                    _other_preset_keys(domain, cfg, preset_name))
         step(f"Ap preset '{preset_name}'", ok3, detail)
         if not ok3:
             return {"domain": domain, "ok": False, "steps": steps}
@@ -626,7 +670,8 @@ def apply_preset(domain, preset_name, cfg):
         if not zone:
             return {"domain": domain, "ok": False, "steps": [
                 {"step": "Tim zone", "ok": False, "detail": "chua co zone tren Cloudflare — bam Setup truoc"}]}
-        detail, ok = _sync_records(domain, preset, cf, zone)
+        detail, ok = _sync_records(domain, preset, cf, zone,
+                                   _other_preset_keys(domain, cfg, preset_name))
         return {"domain": domain, "ok": ok, "steps": [
             {"step": f"Ap preset '{preset_name}'", "ok": ok, "detail": detail}]}
     except Exception as e:
@@ -911,16 +956,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/setup":
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
-                res = setup_domain(d, preset, cfg)
+                res = setup_domain(d, preset, cfg, skip_records=bool(body.get("skip_records")))
                 _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json(res)
             elif path == "/api/setup-all":
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                _skip = body.get("skip_records")
+                skip_set = (set(str(x).strip().lower() for x in _skip) if isinstance(_skip, list)
+                            else (set(cfg["domains"]) if _skip else set()))
                 results = []
                 rate_limited = False
                 for i, d in enumerate(cfg["domains"]):
-                    res = setup_domain(d, preset, cfg)
+                    res = setup_domain(d, preset, cfg, skip_records=(d in skip_set))
                     results.append(res)
                     _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     if _setup_hit_rate_limit(res):
@@ -948,12 +996,15 @@ class Handler(BaseHTTPRequestHandler):
                         seen.add(d)
                         domains.append(d)
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                _skip = body.get("skip_records")
+                skip_set = (set(str(x).strip().lower() for x in _skip) if isinstance(_skip, list)
+                            else (set(domains) if _skip else set()))
                 results = []
                 rate_limited = False
                 for i, d in enumerate(domains):
                     if d not in cfg["domains"]:
                         cfg["domains"].append(d)
-                    res = setup_domain(d, preset, cfg)
+                    res = setup_domain(d, preset, cfg, skip_records=(d in skip_set))
                     results.append(res)
                     _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     if _setup_hit_rate_limit(res):
@@ -1336,6 +1387,19 @@ class Handler(BaseHTTPRequestHandler):
                 if not clean:
                     self._json({"error": "preset can it nhat 1 record co Content"}, 400)
                     return
+                # Khong cho 2 preset trung het cau hinh (1 domain chi co
+                # 1 cau hinh, trung nhau thi khong biet dang dung preset nao).
+                new_keys = sorted((r["type"], r["name"], r["content"], r["proxied"]) for r in clean)
+                for other, orecs in (cfg.get("presets") or {}).items():
+                    if other == name:
+                        continue
+                    other_keys = sorted((str(x.get("type", "A")).upper(),
+                                         str(x.get("name", "")).strip(),
+                                         str(x.get("content", "")).strip(),
+                                         bool(x.get("proxied", True))) for x in orecs)
+                    if new_keys == other_keys:
+                        self._json({"error": f"preset nay trung het record voi preset '{other}' — doi ten hoac sua record roi luu lai"}, 400)
+                        return
                 cfg["presets"][name] = clean
                 if body.get("set_default"):
                     cfg["default_preset"] = name
