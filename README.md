@@ -67,14 +67,15 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   nữa: record giống hệt preset thì giữ, record trùng tên/loại nhưng khác
   nội dung thì xóa cái cũ rồi thêm mới, record khác (không nằm trong
   preset) giữ nguyên. Setup mà chưa chọn preset thì báo lỗi, không xóa gì.
-- **Tab "Setup email"** — là tab mail riêng: chứa mục Email preset (rule
-  forward) + bảng chỉ hiện domain có zone đã **active**. Mỗi dòng hiện đủ
-  2 trạng thái: **Routing status** (Enabled/Disabled + số rule) và **DNS
-  records** (Locked khi record MX/SPF/DKIM đang bị khóa). Mỗi dòng có nút
-  "Setup email" (chỉ chạy bước Email Routing) và nút "Setup email tất cả
-  (active)". Đồng bộ rule: rule giống hệt thì giữ, rule trùng y hệt thì
-  xóa bớt, rule cùng địa chỉ nhưng khác đích thì thay bằng rule preset,
-  rule của địa chỉ khác giữ nguyên.
+- **Email preset + Setup email ở bảng home** — không còn tab mail riêng:
+  card **Email preset** (rule forward) nằm ngay ở trang chính, dưới card
+  HTTPS preset. Muốn setup email thì tick chọn domain ở bảng quản lý rồi
+  bấm **"Setup email đã chọn"** trên thanh công cụ (chức năng y như bên
+  tab mail cũ): domain nào đã set đủ (Email Routing đã bật + rule đã có
+  theo preset) thì **bỏ qua**, zone pending thì bỏ qua luôn, chưa set thì
+  setup. Đồng bộ rule: rule giống hệt thì giữ, rule trùng y hệt thì xóa
+  bớt, rule cùng địa chỉ nhưng khác đích thì thay bằng rule preset, rule
+  của địa chỉ khác giữ nguyên.
 - **Bảng quản lý** — hiện hết domain trong tài khoản, khỏi bấm Thêm:
   mở trang là tool tự đưa hết zone vào bảng quản lý (domain nào bạn đã
   xóa khỏi bảng thì không đưa lại). Có thanh tìm kiếm, phân trang
@@ -149,30 +150,23 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   được thay bằng trạng thái nhẹ (hết lỗi ở cột DNS). Domain đang lỗi
   mà zone đã có trong tài khoản thì bảng vẫn hiện zone (active + NS)
   bên dưới dòng lỗi để thấy zone đã xanh.
+- **Setup nhanh hơn** — đợi DNS lan truyền sau khi đổi NS chỉ còn tối
+  đa ~9 giây (trước 30 giây): check DNS ngay sau khi đổi, rồi 3 giây/lần,
+  thấy NS mới là dừng; chưa thấy thì vẫn chạy tiếp (kiểm tra lại sau).
+  Nghỉ giữa các domain trong loat Setup còn 3 giây (trước 5 giây), nghỉ
+  giữa các loat "Kiểm tra tất cả" còn 3 giây. Setup 10 domain nhanh hơn
+  khoảng 2–3 phút so với trước.
 - **Cửa sổ thông báo sau khi lệnh xong** — mỗi lệnh chạy xong (Setup,
   Setup danh sách, Áp record, Áp HTTPS, Bypass cache, Xóa zone,
   Kiểm tra, Setup email, Thêm domain) đều hiện cửa sổ thông báo tóm
   tắt: xong bao nhiêu domain, bỏ qua bao nhiêu (đã set đủ), lỗi bao
   nhiêu — kèm tên domain (vd "Setup email xong 3 domain: a.com,
   b.com, c.com"). Bấm "Đóng" hoặc bấm ra ngoài để tắt.
-- **Thanh điều hướng dọc** — bên trái có 2 mục: **Setup domain** (cài đặt,
-  preset record, HTTPS preset, setup theo danh sách, bảng quản lý) và
-  **Setup email** (email preset, setup email theo danh sách, bảng email).
-  Log chạy chung ở dưới cùng, lúc nào cũng thấy.
-- **Setup email theo danh sách** — ở mục Setup email có ô nhập nhiều
-  domain (mỗi dòng 1 domain), bấm Setup email: tool kiểm tra từng
-  domain, domain nào đã set đủ (Email Routing đã bật + rule đã có theo
-  preset) thì **bỏ qua**, chưa set thì setup; zone pending thì bỏ qua
-  luôn (không đợi 5 phút như nút setup lẻ). Có nút thêm các domain đó
-  vào bảng quản lý.
-- **Tab Setup email** — hiện hết domain đang quản lý (không chỉ
-  active), mỗi dòng có cột **DNS** (zone active/pending + NS, lấy từ
-  danh sách tài khoản nên thấy ngay), Routing status, DNS records
-  (Locked/Unlocked) và nút Setup email (zone pending thì khóa nút).
-  Phân trang **10 domain/trang**, tick checkbox để chọn nhiều domain
-  rồi bấm **"Setup email đã chọn"** setup 1 lần. Mỗi cột DNS / Routing
-  status / DNS records có **bộ lọc riêng**. Không còn nút Setup
-  email tất cả.
+- **Domain đã tick không bị mất khi tìm/trang khác** — domain đã chọn
+  được giữ trong bộ nhớ (không phụ thuộc ô checkbox trên màn hình) nên
+  tìm cái khác, đổi trang hay lọc cột khác rồi quay lại vẫn còn nguyên.
+  Tick "chọn tất cả" chỉ chọn các dòng đang hiện (trang hiện tại sau khi
+  tìm/lọc). Xóa domain khỏi bảng thì tự bỏ chọn nó.
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo

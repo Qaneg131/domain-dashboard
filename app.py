@@ -183,8 +183,12 @@ def _sync_ns(domain, ns, cfg):
         # "Too many requests"). Chi goi getList khi DoH chua xac nhan
         # (lan truyen cham) de biet phia registrar da ghi chua.
         propagated = False
-        for _ in range(6):
-            time.sleep(5)
+        for i in range(4):
+            # Check ngay lan dau, roi 3s/lan (toi da ~9s thay vi 30s) —
+            # lan truyen chi de xac nhan, setup van chay tiep neu chua
+            # thay, nen khong can doi lau.
+            if i > 0:
+                time.sleep(3)
             try:
                 if set(_doh(domain)) == set(ns):
                     propagated = True
@@ -886,7 +890,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     if i < len(cfg["domains"]) - 1:
                         # Nghi giua cac domain de Namecheap API khong bi don.
-                        time.sleep(5)
+                        time.sleep(3)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results,
                             "rate_limited": rate_limited})
@@ -920,7 +924,7 @@ class Handler(BaseHTTPRequestHandler):
                     if i < len(domains) - 1:
                         # Nghi giua cac domain de Namecheap API khong bi don
                         # (setup loat 5-10 domain khong dinh "Too many requests").
-                        time.sleep(5)
+                        time.sleep(3)
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results,
