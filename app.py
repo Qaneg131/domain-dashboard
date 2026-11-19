@@ -1,0 +1,593 @@
+#!/usr/bin/env python3
+"""Domain Dashboard — quan ly domain Namecheap + Cloudflare BANG API,
+khong can mo Chrome.
+
+Chay:  python app.py   (hoac double-click run.bat)
+Mo:    http://127.0.0.1:8787
+
+Chuc nang:
+- Bang tong quan: moi domain da set NS chua (check bang DNS that),
+  zone Cloudflare status gi, record nao dang co.
+- Bam Setup: tu dong tao zone Cloudflare -> doi NS o Namecheap (API)
+  -> ap preset record. Khong mo trinh duyet.
+- Luu preset record (vd 'web': A @ + A www) de ap nhanh cho domain moi.
+- Them/xoa domain, sua preset, nhap key o muc Cai dat.
+
+Can (nhap o muc Cai dat):
+- Cloudflare API token (quyen Zone:Edit + DNS:Edit)
+- Namecheap API key + whitelist IP may nay (Profile -> Tools -> API Access)
+Chi chay local (127.0.0.1), token/key chi luu o config.json tren may nay.
+"""
+import json
+import os
+import time
+import traceback
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from cf_api import CFClient, CFError, expand_name
+from dns_check import doh_ns, my_ip
+from nc_api import NCClient, NCError
+from store import load_config, save_config, load_status, save_status, BASE_DIR
+
+PORT = int(os.environ.get("PORT", "8787"))
+CF_BASE = os.environ.get("CF_API_BASE") or None
+NC_BASE = os.environ.get("NC_API_BASE") or None
+DOH_BASE = os.environ.get("DOH_BASE") or None
+
+WEB_DIR = BASE_DIR / "web"
+
+
+# ------------------------------------------------------------------ logic
+def _cf_client(cfg):
+    kw = {}
+    if CF_BASE:
+        kw["base"] = CF_BASE
+    return CFClient(cfg.get("cf_token", ""), cfg.get("cf_account_id"), **kw)
+
+
+def _nc_client(cfg):
+    kw = {}
+    if NC_BASE:
+        kw["base"] = NC_BASE
+    return NCClient(cfg.get("nc_user", ""), cfg.get("nc_api_key", ""),
+                    cfg.get("nc_client_ip", ""), **kw)
+
+
+def _doh(domain):
+    kw = {}
+    if DOH_BASE:
+        kw["base"] = DOH_BASE
+    return doh_ns(domain, **kw)
+
+
+def _nc_configured(cfg):
+    return bool(cfg.get("nc_user") and cfg.get("nc_api_key") and cfg.get("nc_client_ip"))
+
+
+def _records_match(records, preset, domain):
+    """Record hien co co khop preset khong (so theo type + ten day du + content)."""
+    want = {(r["type"].upper(), expand_name(domain, r.get("name", "")).lower(),
+             str(r.get("content", "")).strip())
+            for r in preset}
+    have = {(r.get("type", "").upper(), (r.get("name", "") or "").lower(),
+             str(r.get("content", "")).strip())
+            for r in records}
+    return want and want <= have
+
+
+def check_domain(domain, cfg):
+    """Trang thai 1 domain: zone CF, NS (DNS cong + Namecheap), records."""
+    domain = domain.strip().lower()
+    st = {"domain": domain, "checked_at": time.strftime("%H:%M:%S %d/%m/%Y"),
+          "zone": None, "doh_ns": [], "registrar_ns": [],
+          "ns_ok": False, "records": [], "records_ok": None,
+          "email": None, "https": None, "error": None}
+    try:
+        if not cfg.get("cf_token"):
+            st["error"] = "chua nhap Cloudflare API token (muc Cai dat)"
+            return st
+        cf = _cf_client(cfg)
+        zone = cf.get_zone(domain)
+        if zone:
+            st["zone"] = {"id": zone.get("id"), "status": zone.get("status"),
+                          "name_servers": [x.lower() for x in zone.get("name_servers", [])]}
+        try:
+            st["doh_ns"] = _doh(domain)
+        except Exception as e:
+            st["error"] = f"DoH lookup loi: {e}"
+        if _nc_configured(cfg):
+            try:
+                st["registrar_ns"] = _nc_client(cfg).get_nameservers(domain)
+            except Exception as e:
+                st["registrar_ns_error"] = str(e)
+        if st["zone"] and st["doh_ns"]:
+            want = {x.lower() for x in st["zone"]["name_servers"]}
+            st["ns_ok"] = bool(want) and set(st["doh_ns"]) == want
+        if st["zone"]:
+            try:
+                st["records"] = [{"id": r.get("id"), "type": r.get("type"),
+                                  "name": r.get("name"), "content": r.get("content"),
+                                  "proxied": r.get("proxied")}
+                                 for r in cf.list_records(st["zone"]["id"])]
+                preset = cfg.get("presets", {}).get(cfg.get("default_preset", ""), [])
+                if preset:
+                    st["records_ok"] = _records_match(st["records"], preset, domain)
+            except Exception as e:
+                st["error"] = f"khong doc duoc records: {e}"
+            # Email Routing + HTTPS (can quyen Zone Settings / Email Routing
+            # Rules tren token; loi thi ghi rieng, khong lam hong check chung).
+            try:
+                er = cf.get_email_routing(st["zone"]["id"])
+                rules = cf.list_email_rules(st["zone"]["id"])
+                st["email"] = {"enabled": bool(er.get("enabled")),
+                               "status": er.get("status"),
+                               "rules": len(rules)}
+            except Exception as e:
+                st["email"] = {"enabled": False, "status": None, "rules": 0,
+                               "error": str(e)}
+            try:
+                st["https"] = cf.get_https(st["zone"]["id"])
+            except Exception as e:
+                st["https"] = {"ssl": None, "always_https": None, "rewrites": None,
+                               "ok": False, "error": str(e)}
+    except Exception as e:
+        st["error"] = str(e)
+    return st
+
+
+def _sync_ns(domain, ns, cfg):
+    """Dong bo NS: check DNS that -> neu chua tro dung thi doi o Namecheap
+    (API) roi doi lan truyen. Tra ve (steps, ok). Dung chung cho Setup
+    va nut 'Dong bo NS' trong popup Edit."""
+    steps = []
+
+    def step(name, ok, detail=""):
+        steps.append({"step": name, "ok": ok, "detail": detail})
+        return ok
+
+    try:
+        doh = _doh(domain)
+        if set(doh) == set(ns):
+            step("Nameserver", True, f"da tro dung tren DNS: {', '.join(doh)}")
+            return steps, True
+    except Exception as e:
+        step("Check NS tren DNS", False, str(e))
+    if not _nc_configured(cfg):
+        step("Doi NS o Namecheap", False,
+             "chua cau hinh Namecheap API (user/key/IP) — vao muc Cai dat")
+        return steps, False
+    try:
+        _nc_client(cfg).set_nameservers(domain, ns)
+        reg = _nc_client(cfg).get_nameservers(domain)
+        if set(reg) != set(ns):
+            step("Doi NS o Namecheap", False, f"registrar tra ve khac: {', '.join(reg)}")
+            return steps, False
+        step("Doi NS o Namecheap", True, f"registrar da ghi: {', '.join(reg)}")
+        propagated = False
+        for _ in range(6):
+            time.sleep(5)
+            try:
+                if set(_doh(domain)) == set(ns):
+                    propagated = True
+                    break
+            except Exception:
+                pass
+        step("DNS lan truyen", propagated,
+             "NS moi da thay tren DNS cong" if propagated
+             else "registrar da doi, DNS cong chua thay (cho them roi bam Kiem tra)")
+        # Registrar da ghi dung la coi nhu dong bo xong (phia minh); lan
+        # truyen chi la doi — van cho chay tiep records, buoc lan truyen
+        # tu ghi ok/failed de biet.
+        return steps, True
+    except Exception as e:
+        step("Doi NS o Namecheap", False, str(e))
+        return steps, False
+
+
+def _get_zone_or_error(domain, cfg):
+    """(cf, zone, error) — lay zone, bao loi ro neu chua co / chua co token."""
+    if not cfg.get("cf_token"):
+        return None, None, "chua nhap Cloudflare API token"
+    cf = _cf_client(cfg)
+    zone = cf.get_zone(domain)
+    if not zone:
+        return cf, None, "chua co zone tren Cloudflare — bam Setup truoc"
+    return cf, zone, None
+
+
+def setup_domain(domain, preset_name, cfg):
+    """Setup 1 domain: tao zone CF -> doi NS Namecheap -> ap preset record.
+    Tra ve {domain, ok, steps:[{step, ok, detail}]}."""
+    domain = domain.strip().lower()
+    preset_name = preset_name or cfg.get("default_preset", "")
+    steps = []
+
+    def step(name, ok, detail=""):
+        steps.append({"step": name, "ok": ok, "detail": detail})
+        return ok
+
+    if not cfg.get("cf_token"):
+        step("Cloudflare API token", False, "chua nhap token (muc Cai dat)")
+        return {"domain": domain, "ok": False, "steps": steps}
+    cf = _cf_client(cfg)
+    try:
+        zone, created = cf.get_or_create_zone(domain)
+    except Exception as e:
+        step("Tao/lay zone Cloudflare", False, str(e))
+        return {"domain": domain, "ok": False, "steps": steps}
+    step("Tao/lay zone Cloudflare", True,
+         ("da tao moi" if created else "da co san") + f" — status: {zone.get('status')}")
+    ns = [x.lower() for x in zone.get("name_servers", [])]
+    if len(ns) != 2:
+        step("Lay nameserver", False, f"zone tra ve NS bat thuong: {ns}")
+        return {"domain": domain, "ok": False, "steps": steps}
+
+    # 2. NS da tro dung chua? (check bang DNS that)
+    ns_steps, ns_ok = _sync_ns(domain, ns, cfg)
+    steps.extend(ns_steps)
+    if not ns_ok:
+        return {"domain": domain, "ok": False, "steps": steps}
+
+    # 3. Records theo preset.
+    if preset_name:
+        preset = cfg.get("presets", {}).get(preset_name)
+        if not preset:
+            step(f"Ap preset '{preset_name}'", False, "preset khong ton tai")
+        else:
+            try:
+                deleted = cf.delete_all_records(zone["id"])
+                added = 0
+                for r in preset:
+                    cf.create_record(zone["id"], r["type"].upper(),
+                                     expand_name(domain, r.get("name", "")),
+                                     str(r.get("content", "")).strip(),
+                                     bool(r.get("proxied", True)))
+                    added += 1
+                step(f"Ap preset '{preset_name}'", True,
+                     f"da xoa {deleted} record cu, them {added} record moi")
+            except Exception as e:
+                step(f"Ap preset '{preset_name}'", False, str(e))
+                return {"domain": domain, "ok": False, "steps": steps}
+    ok = all(s["ok"] for s in steps)
+    return {"domain": domain, "ok": ok, "steps": steps}
+
+
+def apply_preset(domain, preset_name, cfg):
+    """Chi ap preset record (khong dong NS)."""
+    if not cfg.get("cf_token"):
+        return {"domain": domain, "ok": False, "steps": [
+            {"step": "Cloudflare API token", "ok": False, "detail": "chua nhap token"}]}
+    preset = cfg.get("presets", {}).get(preset_name)
+    if not preset:
+        return {"domain": domain, "ok": False, "steps": [
+            {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": "preset khong ton tai"}]}
+    try:
+        cf = _cf_client(cfg)
+        zone = cf.get_zone(domain)
+        if not zone:
+            return {"domain": domain, "ok": False, "steps": [
+                {"step": "Tim zone", "ok": False, "detail": "chua co zone tren Cloudflare — bam Setup truoc"}]}
+        deleted = cf.delete_all_records(zone["id"])
+        added = 0
+        for r in preset:
+            cf.create_record(zone["id"], r["type"].upper(),
+                             expand_name(domain, r.get("name", "")),
+                             str(r.get("content", "")).strip(), bool(r.get("proxied", True)))
+            added += 1
+        return {"domain": domain, "ok": True, "steps": [
+            {"step": f"Ap preset '{preset_name}'", "ok": True,
+             "detail": f"da xoa {deleted} record cu, them {added} record moi"}]}
+    except Exception as e:
+        return {"domain": domain, "ok": False, "steps": [
+            {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": str(e)}]}
+
+
+# ------------------------------------------------------------------- server
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _json(self, obj, code=200):
+        body = json.dumps(obj, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            return json.loads(self.rfile.read(n).decode() or "{}")
+        except Exception:
+            return {}
+
+    def do_GET(self):
+        p = urllib.parse.urlparse(self.path)
+        path = p.path
+        if path in ("/", "/index.html"):
+            f = WEB_DIR / "index.html"
+            if not f.exists():
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path == "/api/state":
+            cfg = load_config()
+            st = load_status()
+            self._json({"config": cfg, "status": st})
+            return
+        if path == "/api/my-ip":
+            try:
+                self._json({"ip": my_ip()})
+            except Exception as e:
+                self._json({"error": str(e)}, 500)
+            return
+        self._json({"error": "khong co route"}, 404)
+
+    def do_POST(self):
+        p = urllib.parse.urlparse(self.path)
+        path = p.path
+        body = self._body()
+        cfg = load_config()
+        st = load_status()
+        try:
+            if path == "/api/settings":
+                for k in ("cf_token", "cf_account_id", "nc_user", "nc_api_key", "nc_client_ip"):
+                    if k in body:
+                        cfg[k] = str(body[k]).strip()
+                save_config(cfg)
+                self._json({"ok": True})
+            elif path == "/api/domains":
+                d = str(body.get("domain", "")).strip().lower()
+                if not d or "." not in d:
+                    self._json({"error": "domain khong hop le"}, 400)
+                elif d in cfg["domains"]:
+                    self._json({"error": "domain da co trong danh sach"}, 400)
+                else:
+                    cfg["domains"].append(d)
+                    save_config(cfg)
+                    self._json({"ok": True, "domains": cfg["domains"]})
+            elif path == "/api/domains/delete":
+                d = str(body.get("domain", "")).strip().lower()
+                cfg["domains"] = [x for x in cfg["domains"] if x != d]
+                st.pop(d, None)
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": True, "domains": cfg["domains"]})
+            elif path == "/api/check":
+                if body.get("all"):
+                    for d in cfg["domains"]:
+                        st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"ok": True, "status": st})
+                else:
+                    d = str(body.get("domain", "")).strip().lower()
+                    st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"ok": True, "status": {d: st[d]}})
+            elif path == "/api/setup":
+                d = str(body.get("domain", "")).strip().lower()
+                preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                res = setup_domain(d, preset, cfg)
+                st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json(res)
+            elif path == "/api/setup-all":
+                preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                results = []
+                for d in cfg["domains"]:
+                    res = setup_domain(d, preset, cfg)
+                    results.append(res)
+                    st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/apply-preset":
+                d = str(body.get("domain", "")).strip().lower()
+                preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                res = apply_preset(d, preset, cfg)
+                st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json(res)
+            elif path == "/api/domain-detail":
+                # Chi tiet day du cho popup Edit: DNS + records + email + https.
+                d = str(body.get("domain", "")).strip().lower()
+                det = check_domain(d, cfg)
+                det["presets"] = cfg.get("presets", {})
+                det["default_preset"] = cfg.get("default_preset", "")
+                if det.get("zone"):
+                    try:
+                        cf = _cf_client(cfg)
+                        er = cf.get_email_routing(det["zone"]["id"])
+                        det["email_detail"] = {
+                            "enabled": bool(er.get("enabled")),
+                            "status": er.get("status"),
+                            "rules": cf.list_email_rules(det["zone"]["id"]),
+                            "addresses": cf.list_email_addresses(det["zone"]["id"]),
+                        }
+                    except Exception as e:
+                        det["email_detail"] = {"enabled": False, "status": None,
+                                               "rules": [], "addresses": [],
+                                               "error": str(e)}
+                self._json(det)
+            elif path == "/api/sync-ns":
+                d = str(body.get("domain", "")).strip().lower()
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "steps": [
+                        {"step": "Tim zone", "ok": False, "detail": err}]})
+                    return
+                ns = [x.lower() for x in zone.get("name_servers", [])]
+                steps, ok = _sync_ns(d, ns, cfg)
+                st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json({"domain": d, "ok": ok, "steps": steps})
+            elif path == "/api/set-records":
+                d = str(body.get("domain", "")).strip().lower()
+                recs = body.get("records") or []
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "steps": [
+                        {"step": "Tim zone", "ok": False, "detail": err}]})
+                    return
+                try:
+                    deleted = cf.delete_all_records(zone["id"])
+                    added = 0
+                    for r in recs:
+                        ct = str(r.get("content", "")).strip()
+                        if not ct:
+                            continue
+                        cf.create_record(zone["id"], str(r.get("type", "A")).upper(),
+                                         expand_name(d, r.get("name", "")),
+                                         ct, bool(r.get("proxied", True)))
+                        added += 1
+                    st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"domain": d, "ok": True, "steps": [
+                        {"step": "Luu records", "ok": True,
+                         "detail": f"da xoa {deleted} record cu, them {added} record moi"}]})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "steps": [
+                        {"step": "Luu records", "ok": False, "detail": str(e)}]})
+            elif path == "/api/email-enable":
+                d = str(body.get("domain", "")).strip().lower()
+                enable = bool(body.get("enabled"))
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                try:
+                    if enable:
+                        cf.enable_email_routing(zone["id"])
+                        msg = ("da bat Email Routing (Cloudflare da them/khoa 3 MX "
+                               "+ SPF + DKIM — mail cu se mat)")
+                    else:
+                        cf.disable_email_routing(zone["id"])
+                        msg = "da tat Email Routing"
+                    st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"domain": d, "ok": True, "message": msg})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/email-rule":
+                d = str(body.get("domain", "")).strip().lower()
+                match = str(body.get("match", "")).strip()
+                dests = [x.strip() for x in (body.get("destinations") or [])
+                         if str(x).strip()]
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                if not match or not dests:
+                    self._json({"domain": d, "ok": False,
+                                "error": "thieu dia chi gui (match) hoac dia chi nhan"})
+                    return
+                try:
+                    r = cf.create_email_rule(zone["id"], match, dests)
+                    self._json({"domain": d, "ok": True, "rule": r})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e),
+                                "hint": ("neu bao 'Destination address is not verified' thi "
+                                         "them dia chi dich o duoi roi bam link xac minh trong mail")})
+            elif path == "/api/email-rule-delete":
+                d = str(body.get("domain", "")).strip().lower()
+                rid = str(body.get("rule_id", "")).strip()
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                try:
+                    cf.delete_email_rule(zone["id"], rid)
+                    self._json({"domain": d, "ok": True})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/email-address":
+                d = str(body.get("domain", "")).strip().lower()
+                email = str(body.get("email", "")).strip()
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                try:
+                    r = cf.create_email_address(zone["id"], email)
+                    self._json({"domain": d, "ok": True, "address": r,
+                                "message": "da gui mail xac minh toi " + email +
+                                           " — bam link trong mail roi moi dung duoc"})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/set-https":
+                d = str(body.get("domain", "")).strip().lower()
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                try:
+                    out = cf.set_https(zone["id"],
+                                       ssl=body.get("ssl"),
+                                       always_https=body.get("always_https"),
+                                       rewrites=body.get("rewrites"))
+                    st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"domain": d, "ok": True, "https": out})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/presets":
+                name = str(body.get("name", "")).strip()
+                recs = body.get("records") or []
+                if not name:
+                    self._json({"error": "thieu ten preset"}, 400)
+                    return
+                clean = []
+                for r in recs:
+                    t = str(r.get("type", "A")).strip().upper()
+                    nm = str(r.get("name", "")).strip()
+                    ct = str(r.get("content", "")).strip()
+                    if not ct:
+                        continue
+                    clean.append({"type": t, "name": nm or "@", "content": ct,
+                                  "proxied": bool(r.get("proxied", True))})
+                if not clean:
+                    self._json({"error": "preset can it nhat 1 record co Content"}, 400)
+                    return
+                cfg["presets"][name] = clean
+                if body.get("set_default"):
+                    cfg["default_preset"] = name
+                save_config(cfg)
+                self._json({"ok": True, "presets": cfg["presets"],
+                            "default_preset": cfg.get("default_preset")})
+            elif path == "/api/presets/delete":
+                name = str(body.get("name", "")).strip()
+                cfg["presets"].pop(name, None)
+                if cfg.get("default_preset") == name:
+                    cfg["default_preset"] = next(iter(cfg["presets"]), "")
+                save_config(cfg)
+                self._json({"ok": True, "presets": cfg["presets"],
+                            "default_preset": cfg.get("default_preset")})
+            elif path == "/api/preset-default":
+                name = str(body.get("name", "")).strip()
+                if name in cfg["presets"]:
+                    cfg["default_preset"] = name
+                    save_config(cfg)
+                self._json({"ok": True, "default_preset": cfg.get("default_preset")})
+            else:
+                self._json({"error": "khong co route"}, 404)
+        except Exception:
+            traceback.print_exc()
+            self._json({"error": "loi server"}, 500)
+
+
+def main():
+    print(f"Domain Dashboard chay o http://127.0.0.1:{PORT} (chi local, Ctrl+C de dung)")
+    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

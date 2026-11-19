@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Domain Dashboard — Namecheap + Cloudflare (API)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Segoe UI, system-ui, sans-serif; margin: 0; background: #f5f2ed; color: #16130f; }
+  header { background: #16130f; color: #f5f2ed; padding: 16px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header h1 span { color: #cf9a5f; }
+  header p { margin: 4px 0 0; color: #b8b0a4; font-size: 13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 40px; }
+  .card { background: #fffdf9; border: 1px solid #e3ddd2; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  label { font-size: 13px; color: #4c463e; min-width: 150px; }
+  input, select { padding: 7px 9px; border: 1px solid #cfc8ba; border-radius: 4px; font-size: 14px; background: #fff; }
+  input[type=text], input[type=password] { flex: 1; min-width: 200px; }
+  button { padding: 8px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;
+           background: #16130f; color: #fff; }
+  button:hover { opacity: .85; }
+  button.secondary { background: #fff; color: #16130f; border: 1px solid #16130f; }
+  button.warn { background: #b3261e; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.small { padding: 5px 9px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #eee7db; vertical-align: top; }
+  th { color: #857c6f; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .ok { background: #dcf2e3; color: #137333; }
+  .no { background: #fdecea; color: #b3261e; }
+  .wait { background: #fff3cd; color: #7a5b00; }
+  .muted { color: #857c6f; font-size: 13px; }
+  .mono { font-family: Consolas, monospace; font-size: 13px; }
+  #log { white-space: pre-wrap; background: #16130f; color: #e8e2d6; padding: 12px; border-radius: 6px;
+         font-family: Consolas, monospace; font-size: 13px; max-height: 260px; overflow: auto; }
+  .preset-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .preset-row input { flex: 1; }
+  .preset-row select { width: 90px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .hint { font-size: 13px; color: #857c6f; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(22,19,15,.55); display: none;
+              align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 10; overflow: auto; }
+  .modal-bg.open { display: flex; }
+  .modal { background: #fffdf9; border-radius: 10px; max-width: 760px; width: 100%; padding: 20px; }
+  .modal h2 { margin: 0 0 4px; }
+  .modal h3 { margin: 18px 0 8px; font-size: 15px; border-top: 1px solid #eee7db; padding-top: 14px; }
+  .modal h3:first-of-type { border-top: none; padding-top: 0; }
+  .modal .close { float: right; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Domain <span>Dashboard</span></h1>
+  <p>Namecheap + Cloudflare bằng API — không cần mở Chrome. Bấm Setup là tự chạy hết.</p>
+</header>
+<main>
+  <div class="card">
+    <details id="settingsBox">
+      <summary>Cài đặt — Cloudflare token &amp; Namecheap API (bấm để mở)</summary>
+      <p class="hint">Cloudflare token: tạo ở Cloudflare Dashboard → My Profile → API Tokens (quyền Zone:Edit + DNS:Edit).
+      Namecheap: bật API Access (Profile → Tools), lấy API key, whitelist IP máy này.</p>
+      <div class="row"><label>Cloudflare API token</label><input type="password" id="cf_token" placeholder="dán token vào đây"></div>
+      <div class="row"><label>Cloudflare Account ID</label><input type="text" id="cf_account_id"></div>
+      <div class="row"><label>Namecheap username</label><input type="text" id="nc_user"></div>
+      <div class="row"><label>Namecheap API key</label><input type="password" id="nc_api_key" placeholder="dán key vào đây"></div>
+      <div class="row"><label>Namecheap Client IP</label><input type="text" id="nc_client_ip" placeholder="IP đã whitelist">
+        <button class="secondary small" onclick="getMyIp()">Lấy IP hiện tại</button>
+        <span class="muted" id="myIp"></span></div>
+      <div class="row"><button onclick="saveSettings()">Lưu cài đặt</button><span class="muted" id="settingsMsg"></span></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Preset record — lưu cấu hình để áp nhanh</h2>
+    <div class="row">
+      <select id="presetSelect" onchange="loadPresetIntoEditor()"></select>
+      <button class="secondary small" onclick="newPreset()">Preset mới</button>
+      <button class="secondary small" onclick="setDefaultPreset()">Đặt làm mặc định</button>
+      <button class="warn small" onclick="deletePreset()">Xóa preset</button>
+      <span class="muted" id="presetDefaultLabel"></span>
+    </div>
+    <div id="presetRows"></div>
+    <div class="row">
+      <button class="secondary small" onclick="addPresetRow()">+ Thêm record</button>
+      <button onclick="savePreset()">Lưu preset</button>
+      <span class="muted">VD preset "web": A @ → IP, A www → IP. Áp preset sẽ xóa hết record cũ rồi thêm mới.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Domains</h2>
+    <div class="row">
+      <input type="text" id="newDomain" placeholder="vd: elvellia.com (Enter để thêm)" style="max-width:300px">
+      <button onclick="addDomain()">Thêm domain</button>
+      <button class="secondary" onclick="checkAll()">Kiểm tra tất cả</button>
+      <button onclick="setupAll()">Setup tất cả (preset mặc định)</button>
+      <span class="muted" id="domainCount"></span>
+    </div>
+    <table>
+      <thead><tr><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th></th></tr></thead>
+      <tbody id="domainTable"><tr><td colspan="6" class="muted">Đang tải…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Kết quả chạy</h2>
+    <div id="log">Chưa chạy gì. Bấm "Kiểm tra tất cả" để xem trạng thái, bấm "Setup" ở từng domain để tự động setup.</div>
+  </div>
+</main>
+
+<div class="modal-bg" id="editModal" onclick="if (event.target === this) closeEdit()">
+  <div class="modal">
+    <button class="secondary small close" onclick="closeEdit()">Đóng ✕</button>
+    <h2 id="editTitle">Edit domain</h2>
+    <p class="muted" id="editSub"></p>
+
+    <h3>DNS — Nameserver</h3>
+    <div id="editDns" class="mono" style="margin-bottom:8px">…</div>
+    <div class="row"><button onclick="syncNs()">Đồng bộ NS ngay</button>
+      <span class="muted">Đổi NS ở Namecheap sang NS của Cloudflare (API).</span></div>
+
+    <h3>Record</h3>
+    <div class="row">
+      <select id="editPresetSelect"></select>
+      <button class="secondary small" onclick="applyPresetInEdit()">Áp preset</button>
+      <span class="muted">hoặc sửa tay rồi bấm Lưu records (xóa hết record cũ rồi thêm mới).</span>
+    </div>
+    <div id="editRecords"></div>
+    <div class="row">
+      <button class="secondary small" onclick="addEditRecordRow()">+ Thêm record</button>
+      <button onclick="saveRecordsInEdit()">Lưu records</button>
+    </div>
+
+    <h3>Email routing</h3>
+    <p class="hint">Bật Email Routing để nhận mail @domain rồi forward về mail thật (vd Gmail).
+    Khi bật, Cloudflare sẽ thêm/khóa 3 MX + SPF + DKIM (ghi đè mail cũ).
+    Địa chỉ nhận phải bấm link xác minh trong mail thì rule mới chạy.</p>
+    <div class="row">
+      <label style="min-width:0"><input type="checkbox" id="editEmailEnabled"> Bật Email Routing</label>
+      <button onclick="saveEmailEnabled()">Lưu</button>
+      <span class="muted" id="editEmailStatus"></span>
+    </div>
+    <div id="editEmailRules" style="margin:8px 0"></div>
+    <div class="row">
+      <input type="text" id="editRuleMatch" placeholder="info@domain.com hoặc * (catch-all)" style="max-width:230px">
+      <input type="text" id="editRuleDest" placeholder="forward tới: ban@gmail.com">
+      <button class="secondary small" onclick="addEmailRule()">+ Thêm rule</button>
+    </div>
+    <div class="row">
+      <input type="text" id="editDestEmail" placeholder="email nhận cần xác minh" style="max-width:230px">
+      <button class="secondary small" onclick="addEmailAddress()">Gửi mail xác minh</button>
+      <span class="muted" id="editEmailMsg"></span>
+    </div>
+
+    <h3>HTTPS</h3>
+    <div class="row">
+      <label>SSL mode</label>
+      <select id="editSsl">
+        <option value="off">Off</option><option value="flexible">Flexible</option>
+        <option value="full">Full</option><option value="strict">Full (strict)</option>
+      </select>
+      <label style="min-width:0"><input type="checkbox" id="editAlwaysHttps"> Always Use HTTPS</label>
+      <label style="min-width:0"><input type="checkbox" id="editRewrites"> Auto HTTPS Rewrites</label>
+      <button onclick="saveHttps()">Lưu HTTPS</button>
+    </div>
+    <p class="hint">Khuyên dùng: Full (hoặc Full strict nếu origin có chứng chỉ hợp lệ) + Always Use HTTPS bật.</p>
+  </div>
+</div>
+<script>
+let STATE = { config: {}, status: {} };
+
+function log(text) {
+  const el = document.getElementById('log');
+  el.textContent = text;
+}
+function api(path, body) {
+  return fetch(path, { method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined }).then(r => r.json());
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function refresh() {
+  const data = await api('/api/state');
+  STATE = data;
+  const cfg = data.config || {};
+  document.getElementById('cf_token').value = cfg.cf_token || '';
+  document.getElementById('cf_account_id').value = cfg.cf_account_id || '';
+  document.getElementById('nc_user').value = cfg.nc_user || '';
+  document.getElementById('nc_api_key').value = cfg.nc_api_key || '';
+  document.getElementById('nc_client_ip').value = cfg.nc_client_ip || '';
+  if (!cfg.cf_token || !cfg.nc_api_key) document.getElementById('settingsBox').open = true;
+  renderPresets();
+  renderTable();
+}
+
+function renderPresets() {
+  const cfg = STATE.config || {};
+  const sel = document.getElementById('presetSelect');
+  const names = Object.keys(cfg.presets || {});
+  sel.innerHTML = names.map(n => `<option value="${esc(n)}" ${n === cfg.default_preset ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  document.getElementById('presetDefaultLabel').textContent = 'Mặc định: ' + (cfg.default_preset || '(chưa có)');
+  loadPresetIntoEditor();
+}
+
+function presetEditorRows(recs) {
+  const box = document.getElementById('presetRows');
+  box.innerHTML = '';
+  (recs || []).forEach(r => addPresetRow(r));
+  if (!recs || !recs.length) addPresetRow();
+}
+function addPresetRow(r) {
+  r = r || { type: 'A', name: '@', content: '', proxied: true };
+  const box = document.getElementById('presetRows');
+  const div = document.createElement('div');
+  div.className = 'preset-row';
+  div.innerHTML = `<select class="p-type">${['A','AAAA','CNAME','TXT','MX','NS','SRV','CAA'].map(t =>
+      `<option ${t === r.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <input class="p-name" placeholder="Name (@ / www)" value="${esc(r.name)}" style="max-width:140px">
+    <input class="p-content" placeholder="Content (IP / đích)" value="${esc(r.content)}">
+    <label class="muted"><input type="checkbox" class="p-proxied" ${r.proxied ? 'checked' : ''}> Proxy</label>
+    <button class="secondary small" onclick="this.parentElement.remove()">✕</button>`;
+  box.appendChild(div);
+}
+function loadPresetIntoEditor() {
+  const name = document.getElementById('presetSelect').value;
+  presetEditorRows((STATE.config.presets || {})[name] || []);
+}
+function editorRecords() {
+  return [...document.querySelectorAll('#presetRows .preset-row')].map(row => ({
+    type: row.querySelector('.p-type').value,
+    name: row.querySelector('.p-name').value.trim(),
+    content: row.querySelector('.p-content').value.trim(),
+    proxied: row.querySelector('.p-proxied').checked,
+  }));
+}
+async function savePreset() {
+  const name = document.getElementById('presetSelect').value || prompt('Tên preset mới:');
+  if (!name) return;
+  const res = await api('/api/presets', { name, records: editorRecords() });
+  if (res.error) { alert(res.error); return; }
+  STATE.config.presets = res.presets;
+  renderPresets();
+  document.getElementById('presetSelect').value = name;
+  log(`Đã lưu preset "${name}".`);
+}
+function newPreset() {
+  const name = prompt('Tên preset mới (vd: web, shop, landing):');
+  if (!name) return;
+  const sel = document.getElementById('presetSelect');
+  const opt = document.createElement('option');
+  opt.value = name; opt.textContent = name;
+  sel.appendChild(opt); sel.value = name;
+  presetEditorRows([]);
+}
+async function deletePreset() {
+  const name = document.getElementById('presetSelect').value;
+  if (!name || !confirm(`Xóa preset "${name}"?`)) return;
+  const res = await api('/api/presets/delete', { name });
+  STATE.config.presets = res.presets;
+  STATE.config.default_preset = res.default_preset;
+  renderPresets();
+}
+async function setDefaultPreset() {
+  const name = document.getElementById('presetSelect').value;
+  const res = await api('/api/preset-default', { name });
+  STATE.config.default_preset = res.default_preset;
+  renderPresets();
+  log(`Preset mặc định: ${name}`);
+}
+async function saveSettings() {
+  const body = {
+    cf_token: document.getElementById('cf_token').value.trim(),
+    cf_account_id: document.getElementById('cf_account_id').value.trim(),
+    nc_user: document.getElementById('nc_user').value.trim(),
+    nc_api_key: document.getElementById('nc_api_key').value.trim(),
+    nc_client_ip: document.getElementById('nc_client_ip').value.trim(),
+  };
+  const res = await api('/api/settings', body);
+  document.getElementById('settingsMsg').textContent = res.ok ? 'Đã lưu.' : (res.error || 'Lỗi.');
+  if (res.ok) Object.assign(STATE.config, body);
+}
+async function getMyIp() {
+  const res = await api('/api/my-ip');
+  if (res.ip) {
+    document.getElementById('myIp').textContent = 'IP hiện tại: ' + res.ip + ' — whitelist IP này ở Namecheap.';
+    document.getElementById('nc_client_ip').value = res.ip;
+  } else alert(res.error || 'Không lấy được IP.');
+}
+
+function yesNo(v) { return v ? '<span class="badge ok">Yes</span>' : '<span class="badge no">No</span>'; }
+
+function renderTable() {
+  const cfg = STATE.config || {};
+  const domains = cfg.domains || [];
+  document.getElementById('domainCount').textContent = domains.length + ' domain';
+  const tb = document.getElementById('domainTable');
+  if (!domains.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
+  tb.innerHTML = domains.map(d => {
+    const s = (STATE.status || {})[d] || {};
+    const zone = s.zone;
+    const dnsCell = s.error && !zone ? `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`
+      : yesNo(s.ns_ok) + `<br><span class="mono">${esc((s.doh_ns || []).join('<br>')) || ''}</span>`
+        + (zone ? `<br><span class="muted">zone: ${esc(zone.status)}</span>` : '');
+    const recs = s.records || [];
+    const recCell = !zone ? '<span class="muted">—</span>'
+      : recs.length === 0 ? '<span class="badge no">No</span> <span class="muted">0 record</span>'
+      : yesNo(true) + ` <span class="muted">${recs.length} record${s.records_ok ? ' ✓ khớp preset' : ''}</span>`;
+    const em = s.email;
+    const emCell = !zone ? '<span class="muted">—</span>'
+      : em && em.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
+      : yesNo(em && em.enabled) + (em && em.enabled ? ` <span class="muted">${em.rules || 0} rule</span>` : '');
+    const ht = s.https;
+    const htCell = !zone ? '<span class="muted">—</span>'
+      : ht && ht.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
+      : yesNo(ht && ht.ok) + (ht && ht.ssl ? ` <span class="muted">${esc(ht.ssl)}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
+    return `<tr>
+      <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}</span></td>
+      <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td>
+      <td style="white-space:nowrap">
+        <button class="small secondary" onclick="openEdit('${esc(d)}')">Edit</button>
+        <button class="small" onclick="setupOne('${esc(d)}')">Setup</button>
+        <button class="small warn" onclick="removeDomain('${esc(d)}')">✕</button>
+      </td></tr>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------- popup Edit
+let EDIT_DOMAIN = '';
+let EDIT_DETAIL = null;
+
+function editRecordRow(r) {
+  r = r || { type: 'A', name: '@', content: '', proxied: true };
+  const div = document.createElement('div');
+  div.className = 'preset-row';
+  div.innerHTML = `<select class="p-type">${['A','AAAA','CNAME','TXT','MX','NS','SRV','CAA'].map(t =>
+      `<option ${t === r.type ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <input class="p-name" placeholder="Name (@ / www)" value="${esc(r.name)}" style="max-width:140px">
+    <input class="p-content" placeholder="Content (IP / đích)" value="${esc(r.content)}">
+    <label class="muted"><input type="checkbox" class="p-proxied" ${r.proxied ? 'checked' : ''}> Proxy</label>
+    <button class="secondary small" onclick="this.parentElement.remove()">✕</button>`;
+  return div;
+}
+function addEditRecordRow(r) { document.getElementById('editRecords').appendChild(editRecordRow(r)); }
+
+async function openEdit(d) {
+  EDIT_DOMAIN = d;
+  document.getElementById('editTitle').textContent = 'Edit — ' + d;
+  document.getElementById('editSub').textContent = 'Đang tải chi tiết…';
+  document.getElementById('editModal').classList.add('open');
+  const det = await api('/api/domain-detail', { domain: d });
+  EDIT_DETAIL = det;
+  const zone = det.zone;
+  document.getElementById('editSub').textContent = zone
+    ? `Zone: ${zone.status} — NS Cloudflare: ${(zone.name_servers || []).join(', ')}`
+    : 'Chưa có zone trên Cloudflare — bấm Setup ở bảng chính trước.';
+  document.getElementById('editDns').innerHTML =
+    `DNS công (DoH): ${(det.doh_ns || []).join(', ') || '—'}<br>` +
+    `Namecheap: ${(det.registrar_ns || []).join(', ') || '—'}<br>` +
+    `Cloudflare NS: ${zone ? (zone.name_servers || []).join(', ') : '—'}<br>` +
+    `Trạng thái NS: ${det.ns_ok ? 'ĐÃ SET ✓' : 'CHƯA TRỎ ĐÚNG'}`;
+  // Record: preset select + rows hien tai.
+  const psel = document.getElementById('editPresetSelect');
+  psel.innerHTML = Object.keys(det.presets || {}).map(n =>
+    `<option value="${esc(n)}" ${n === det.default_preset ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const box = document.getElementById('editRecords');
+  box.innerHTML = '';
+  (det.records || []).forEach(r => box.appendChild(editRecordRow(r)));
+  if (!det.records || !det.records.length) addEditRecordRow();
+  // Email.
+  const em = det.email_detail || {};
+  document.getElementById('editEmailEnabled').checked = !!em.enabled;
+  document.getElementById('editEmailStatus').textContent =
+    em.enabled ? `Đang bật (status: ${em.status || '?'})` : 'Đang tắt';
+  document.getElementById('editEmailRules').innerHTML =
+    (em.rules || []).map(r => {
+      const m = (r.matchers || []).map(mt => mt.type === 'all' ? '*' : (mt.value || '')).join(', ');
+      const a = (r.actions || []).map(ac => (ac.value || []).join(', ')).join(', ');
+      return `<div class="row"><span class="mono">${esc(m)} → ${esc(a)}</span>
+        <button class="secondary small" onclick="deleteEmailRule('${esc(r.id)}')">Xóa</button></div>`;
+    }).join('') || '<span class="muted">Chưa có rule nào.</span>';
+  if (em.error) document.getElementById('editEmailStatus').textContent = 'Lỗi: ' + em.error;
+  // HTTPS.
+  const ht = det.https || {};
+  document.getElementById('editSsl').value = ht.ssl || 'full';
+  document.getElementById('editAlwaysHttps').checked = ht.always_https === 'on';
+  document.getElementById('editRewrites').checked = ht.rewrites === 'on';
+}
+function closeEdit() { document.getElementById('editModal').classList.remove('open'); }
+async function reloadEdit() { if (EDIT_DOMAIN) await openEdit(EDIT_DOMAIN); await refresh(); }
+
+async function syncNs() {
+  log(`Đang đồng bộ NS cho ${EDIT_DOMAIN}…`);
+  const res = await api('/api/sync-ns', { domain: EDIT_DOMAIN });
+  log(fmtSteps(res));
+  await reloadEdit();
+}
+async function applyPresetInEdit() {
+  const preset = document.getElementById('editPresetSelect').value;
+  const res = await api('/api/apply-preset', { domain: EDIT_DOMAIN, preset });
+  log(fmtSteps(res));
+  await reloadEdit();
+}
+async function saveRecordsInEdit() {
+  const recs = [...document.querySelectorAll('#editRecords .preset-row')].map(row => ({
+    type: row.querySelector('.p-type').value,
+    name: row.querySelector('.p-name').value.trim(),
+    content: row.querySelector('.p-content').value.trim(),
+    proxied: row.querySelector('.p-proxied').checked,
+  }));
+  const res = await api('/api/set-records', { domain: EDIT_DOMAIN, records: recs });
+  log(fmtSteps(res));
+  await reloadEdit();
+}
+async function saveEmailEnabled() {
+  const enabled = document.getElementById('editEmailEnabled').checked;
+  if (enabled && !confirm('Bật Email Routing sẽ thêm/khóa 3 MX + SPF + DKIM của Cloudflare (ghi đè mail cũ). Tiếp tục?')) {
+    document.getElementById('editEmailEnabled').checked = false;
+    return;
+  }
+  const res = await api('/api/email-enable', { domain: EDIT_DOMAIN, enabled });
+  log(res.ok ? res.message : ('Lỗi: ' + (res.error || '')));
+  await reloadEdit();
+}
+async function addEmailRule() {
+  const match = document.getElementById('editRuleMatch').value.trim();
+  const dest = document.getElementById('editRuleDest').value.trim();
+  if (!match || !dest) { alert('Nhập cả địa chỉ gửi (match) và địa chỉ nhận.'); return; }
+  const res = await api('/api/email-rule', { domain: EDIT_DOMAIN, match, destinations: [dest] });
+  if (!res.ok) alert('Lỗi: ' + (res.error || '') + (res.hint ? '\n' + res.hint : ''));
+  else log(`Đã thêm rule ${match} → ${dest}`);
+  await reloadEdit();
+}
+async function deleteEmailRule(id) {
+  if (!confirm('Xóa rule này?')) return;
+  await api('/api/email-rule-delete', { domain: EDIT_DOMAIN, rule_id: id });
+  await reloadEdit();
+}
+async function addEmailAddress() {
+  const email = document.getElementById('editDestEmail').value.trim();
+  if (!email) return;
+  const res = await api('/api/email-address', { domain: EDIT_DOMAIN, email });
+  document.getElementById('editEmailMsg').textContent = res.ok ? res.message : ('Lỗi: ' + (res.error || ''));
+}
+async function saveHttps() {
+  const res = await api('/api/set-https', { domain: EDIT_DOMAIN,
+    ssl: document.getElementById('editSsl').value,
+    always_https: document.getElementById('editAlwaysHttps').checked ? 'on' : 'off',
+    rewrites: document.getElementById('editRewrites').checked ? 'on' : 'off' });
+  log(res.ok ? `Đã lưu HTTPS cho ${EDIT_DOMAIN}.` : ('Lỗi: ' + (res.error || '')));
+  await reloadEdit();
+}
+
+async function addDomain() {
+  const d = document.getElementById('newDomain').value.trim().toLowerCase();
+  if (!d) return;
+  const res = await api('/api/domains', { domain: d });
+  if (res.error) { alert(res.error); return; }
+  STATE.config.domains = res.domains;
+  document.getElementById('newDomain').value = '';
+  renderTable();
+}
+document.getElementById('newDomain').addEventListener('keydown', e => { if (e.key === 'Enter') addDomain(); });
+async function removeDomain(d) {
+  if (!confirm(`Xóa ${d} khỏi danh sách? (không xóa zone/record thật)`)) return;
+  const res = await api('/api/domains/delete', { domain: d });
+  STATE.config.domains = res.domains;
+  delete STATE.status[d];
+  renderTable();
+}
+function fmtSteps(res) {
+  if (!res) return 'Không có kết quả.';
+  const lines = [`${res.domain || ''} — ${res.ok ? 'XONG ✓' : 'CHƯA XONG ✗'}`];
+  (res.steps || []).forEach(s => lines.push(`  [${s.ok ? '✓' : '✗'}] ${s.step}${s.detail ? ' — ' + s.detail : ''}`));
+  return lines.join('\n');
+}
+async function checkOne(d) {
+  log(`Đang kiểm tra ${d}…`);
+  const res = await api('/api/check', { domain: d });
+  STATE.status = { ...STATE.status, ...res.status };
+  renderTable();
+  const s = res.status[d] || {};
+  log(`${d}: NS ${s.ns_ok ? 'ĐÃ SET ✓' : 'chưa set'} | zone: ${s.zone ? s.zone.status : 'chưa có'} | records: ${(s.records || []).length}${s.error ? '\nLỗi: ' + s.error : ''}`);
+}
+async function checkAll() {
+  log('Đang kiểm tra tất cả domain…');
+  const res = await api('/api/check', { all: true });
+  STATE.status = res.status || {};
+  renderTable();
+  log(Object.values(STATE.status).map(s =>
+    `${s.domain}: NS ${s.ns_ok ? 'ĐÃ SET ✓' : 'chưa set'} | zone: ${s.zone ? s.zone.status : 'chưa có'} | records: ${(s.records || []).length}${s.error ? ' | lỗi: ' + s.error : ''}`).join('\n'));
+}
+async function setupOne(d) {
+  if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset mặc định (${STATE.config.default_preset || 'chưa có'})`)) return;
+  log(`Đang setup ${d}… (có thể mất ~1 phút nếu đợi DNS lan truyền)`);
+  const res = await api('/api/setup', { domain: d });
+  log(fmtSteps(res));
+  await refresh();
+}
+async function setupAll() {
+  if (!confirm(`Setup TẤT CẢ domain với preset mặc định (${STATE.config.default_preset || 'chưa có'})?`)) return;
+  log('Đang setup tất cả domain… (mỗi domain có thể mất ~1 phút)');
+  const res = await api('/api/setup-all', {});
+  log((res.results || []).map(fmtSteps).join('\n\n'));
+  await refresh();
+}
+async function applyPreset(d) {
+  const preset = STATE.config.default_preset;
+  if (!preset) { alert('Chưa có preset mặc định.'); return; }
+  if (!confirm(`Áp preset "${preset}" cho ${d}? (xóa hết record cũ rồi thêm mới)`)) return;
+  log(`Đang áp preset "${preset}" cho ${d}…`);
+  const res = await api('/api/apply-preset', { domain: d, preset });
+  log(fmtSteps(res));
+  await refresh();
+}
+refresh();
+</script>
+</body>
+</html>

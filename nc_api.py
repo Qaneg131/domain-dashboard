@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Namecheap API — xml.response, chi dung urllib + ElementTree (stdlib).
+
+Dung de doc/ghi nameserver o Namecheap ma khong can mo trinh duyet:
+- namecheap.domains.dns.getList   -> NS hien tai o Namecheap
+- namecheap.domains.dns.setCustom -> doi NS sang Cloudflare
+
+Can bat API access trong tai khoan Namecheap (Profile -> Tools) va
+WHITELIST IP may chay tool (ClientIp). IP doi (mang dong) thi phai
+whitelist lai — xem nut 'Lay IP hien tai' o giao dien.
+"""
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+
+PROD = "https://api.namecheap.com/xml.response"
+
+# TLD 2 cap pho bien (de tach SLD/TLD dung, vd a.co.uk -> SLD=a, TLD=co.uk).
+TWO_LEVEL_TLDS = {"co.uk", "org.uk", "me.uk", "com.au", "net.au", "org.au",
+                  "co.nz", "com.br", "co.jp", "com.cn", "co.in", "com.mx"}
+
+
+class NCError(Exception):
+    pass
+
+
+def split_domain(domain):
+    """'elvellia.com' -> ('elvellia', 'com')."""
+    parts = domain.strip().lower().split(".")
+    if len(parts) < 2:
+        raise NCError(f"domain khong hop le: {domain}")
+    last2 = ".".join(parts[-2:])
+    if last2 in TWO_LEVEL_TLDS and len(parts) >= 3:
+        return ".".join(parts[:-2]), last2
+    return ".".join(parts[:-1]), parts[-1]
+
+
+class NCClient:
+    def __init__(self, user, api_key, client_ip, base=PROD):
+        self.user = user
+        self.api_key = api_key
+        self.client_ip = client_ip
+        self.base = base
+
+    def _call(self, command, **params):
+        q = {"ApiUser": self.user, "ApiKey": self.api_key, "UserName": self.user,
+             "Command": command, "ClientIp": self.client_ip}
+        q.update(params)
+        url = self.base + "?" + urllib.parse.urlencode(q)
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as e:
+            raise NCError(f"HTTP {e.code} tu Namecheap API")
+        except urllib.error.URLError as e:
+            raise NCError(f"khong noi duoc Namecheap API: {e.reason}")
+        try:
+            root = ET.fromstring(raw)
+        except ET.ParseError:
+            raise NCError("Namecheap tra ve XML khong doc duoc")
+        if root.get("Status") != "OK":
+            errs = [e.text for e in root.findall(".//Error") if e.text]
+            raise NCError("; ".join(errs) or "Namecheap API error")
+        return root
+
+    def get_nameservers(self, domain):
+        """NS hien tai o Namecheap (phia registrar)."""
+        sld, tld = split_domain(domain)
+        root = self._call("namecheap.domains.dns.getList", SLD=sld, TLD=tld)
+        return [n.text.strip().lower() for n in root.findall(".//Nameserver")
+                if n.text and n.text.strip()]
+
+    def set_nameservers(self, domain, ns_list):
+        """Doi NS sang danh sach cho truoc. Tra ve True neu Updated=true."""
+        sld, tld = split_domain(domain)
+        root = self._call("namecheap.domains.dns.setCustom", SLD=sld, TLD=tld,
+                          Nameservers=",".join(ns_list))
+        el = root.find(".//DomainDNSSetCustomResult")
+        if el is None or el.get("Updated") != "true":
+            raise NCError("setCustom khong tra ve Updated=true")
+        return True
