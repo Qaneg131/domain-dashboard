@@ -67,7 +67,11 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo
   rule theo email preset → set HTTPS theo https preset (mặc định: SSL
   Flexible + Always Use HTTPS bật + Minimum TLS 1.2 + Auto HTTPS Rewrites
-  bật). Domain nào NS đã set rồi thì tự bỏ qua bước đó. **Lưu ý:** Setup
+  bật). Domain nào NS đã set rồi thì tự bỏ qua bước đó. Email Routing chỉ
+  bật được khi zone đã **active** — zone mới đổi NS xong Cloudflare cần
+  vài phút để kích hoạt, nên Setup tự đợi tối đa 5 phút trước khi báo
+  lỗi; nếu vẫn chưa active thì chạy Setup lại sau vài phút (các bước đã
+  xong sẽ tự bỏ qua). **Lưu ý:** Setup
   luôn xóa record cũ (chỉ giữ lại record hệ thống của Email Routing) nên
   phải kiểm tra preset mặc định có đúng IP/server của bạn không trước khi
   bấm — nếu chưa chọn preset mặc định, Setup vẫn xóa record cũ rồi báo

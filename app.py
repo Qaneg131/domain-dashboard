@@ -201,6 +201,35 @@ def _expand_email_match(domain, match):
     return match
 
 
+# Email Routing chi bat duoc khi zone da active. NS moi doi xong thi
+# Cloudflare can vai phut de kiem tra roi kich hoat — Setup doi toi da
+# 5 phut thay vi bao loi ngay. Test co the doi 2 gia tri nay.
+EMAIL_WAIT_ACTIVE_S = 300
+EMAIL_POLL_S = 30
+_MSG_ZONE_NOT_ACTIVE = ("zone chua active — Cloudflare chua kich hoat zone "
+                        "(NS moi doi xong, thuong mat vai phut) — chay Setup "
+                        "lai sau vai phut, cac buoc da xong se tu bo qua")
+
+
+def _wait_zone_active(domain, cf, zone):
+    """Doi zone active (Cloudflare kich hoat sau khi thay NS dung).
+    Tra ve (active, waited_s). Zone da active thi tra ngay, khong doi."""
+    cur = zone or {}
+    if cur.get("status") == "active":
+        return True, 0
+    waited = 0
+    while waited < EMAIL_WAIT_ACTIVE_S:
+        time.sleep(EMAIL_POLL_S)
+        waited += EMAIL_POLL_S
+        try:
+            cur = cf.get_zone(domain) or {}
+        except Exception:
+            cur = {}
+        if cur.get("status") == "active":
+            return True, waited
+    return False, waited
+
+
 def _apply_email_preset(domain, cfg, cf, zone):
     """Buoc Email Routing trong Setup: bat routing (neu chua) roi dong bo
     rule theo email_preset (rule nao co san giong het thi giu, khac thi
@@ -220,6 +249,14 @@ def _apply_email_preset(domain, cfg, cf, zone):
     try:
         er = cf.get_email_routing(zone["id"])
         if not er.get("enabled"):
+            active, waited = _wait_zone_active(domain, cf, zone)
+            if not active:
+                steps.append({"step": "Email routing", "ok": False,
+                              "detail": _MSG_ZONE_NOT_ACTIVE})
+                return steps, False
+            if waited:
+                steps.append({"step": "Doi zone active", "ok": True,
+                              "detail": f"zone da active sau ~{waited}s"})
             try:
                 cf.enable_email_routing(zone["id"])
             except Exception as e:
@@ -293,7 +330,10 @@ def _apply_email_preset(domain, cfg, cf, zone):
                           "ok": True, "detail": "da tao"})
         return steps, True
     except Exception as e:
-        steps.append({"step": "Email routing", "ok": False, "detail": str(e)})
+        detail = str(e)
+        if "active zone" in detail.lower():
+            detail = _MSG_ZONE_NOT_ACTIVE
+        steps.append({"step": "Email routing", "ok": False, "detail": detail})
         return steps, False
 
 

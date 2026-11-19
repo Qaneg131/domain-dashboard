@@ -278,6 +278,8 @@ function diagnoseOne(text) {
   let m = t.match(/Invalid request IP: ([\d.]+)/);
   if (m) return { error: `Namecheap từ chối vì IP ${m[1]} chưa được whitelist (lỗi 1011150).`,
     fix: `Vào Namecheap → Profile → Tools → API Access → Whitelisted IPs → thêm ${m[1]}. Đồng thời sửa ô "Client IP" trong mục Cài đặt thành ${m[1]} (hoặc bấm "Lấy IP hiện tại"). Nếu IP hay đổi (đang bật Cloudflare WARP/VPN) thì tắt WARP lúc chạy Setup, hoặc whitelist lại IP mới mỗi lần.` };
+  if (/active zone required/i.test(t)) return { error: 'Zone chưa active nên Cloudflare không cho bật Email Routing (không phải thiếu quyền).',
+    fix: 'Đợi Cloudflare kích hoạt zone (thường vài phút sau khi NS lan truyền) rồi bấm Setup lại — các bước đã xong sẽ tự bỏ qua. Bản tool mới cũng tự đợi tối đa 5 phút trước khi báo lỗi này.' };
   if (/Non-Cloudflare MX records exist/i.test(t)) return { error: 'Cloudflare không bật được Email Routing vì domain còn MX của nhà cung cấp mail cũ.',
     fix: 'Tool đã tự xóa MX cũ và bật lại — chạy Setup lại là xong. (Nếu vẫn lỗi, xóa tay MX cũ ở DNS → Records rồi bật lại Email Routing.)' };
   if (/2054|not verified/i.test(t)) return { error: 'Địa chỉ mail nhận chưa được xác minh nên rule không chạy.',

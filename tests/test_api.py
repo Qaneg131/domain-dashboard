@@ -175,7 +175,7 @@ class MockHandler(BaseHTTPRequestHandler):
             name = body["name"]
             zid = f"zone-{STATE['next_id']}"
             STATE["next_id"] += 1
-            z = {"id": zid, "name": name, "status": "pending",
+            z = {"id": zid, "name": name, "status": "active",
                  "name_servers": [NS1, NS2], "account": {"id": ACCT}}
             STATE["zones"][name] = z
             _zone_state(zid)
@@ -196,6 +196,12 @@ class MockHandler(BaseHTTPRequestHandler):
             if len(parts) >= 6 and parts[4] == "email" and parts[5] == "routing":
                 em = STATE["email"][zid]
                 if len(parts) == 7 and parts[6] == "enable":
+                    # API that: zone chua active thi khong bat duoc email.
+                    z = next((zz for zz in STATE["zones"].values()
+                              if zz.get("id") == zid), {})
+                    if z.get("status") != "active":
+                        self._cf_err("Active zone required", 400)
+                        return
                     # API that: con MX khong phai cua Cloudflare thi loi 2008.
                     bad_mx = [r for r in STATE["records"].get(zid, [])
                               if r.get("type") == "MX"
@@ -641,6 +647,28 @@ def main():
     st24 = dash.check_domain("elvellia.com", cfg6)
     assert st24["cache_bypass"] is False, st24
     assert not st24.get("cache_error"), st24
+    print("  OK", flush=True)
+
+    print("TEST 25: zone pending — _apply_email_preset doi roi bao ro, active lai thi ok...", flush=True)
+    z9, _c = cf.get_or_create_zone("pendingzone.com")
+    STATE["zones"]["pendingzone.com"]["status"] = "pending"
+    dash.EMAIL_WAIT_ACTIVE_S = 2
+    dash.EMAIL_POLL_S = 1
+    steps25, ok25 = dash._apply_email_preset(
+        "pendingzone.com", cfg6, cf, {"id": z9["id"], "status": "pending"})
+    assert ok25 is False, steps25
+    assert any((not s["ok"]) and "chua active" in s["detail"]
+               for s in steps25), steps25
+    STATE["zones"]["pendingzone.com"]["status"] = "active"
+    steps25b, ok25b = dash._apply_email_preset(
+        "pendingzone.com", cfg6, cf, {"id": z9["id"], "status": "active"})
+    assert ok25b, steps25b
+    assert any(s["step"].startswith("Rule support@pendingzone.com")
+               for s in steps25b), steps25b
+    assert any(s["step"].startswith("Rule * (catch-all)")
+               for s in steps25b), steps25b
+    dash.EMAIL_WAIT_ACTIVE_S = 300
+    dash.EMAIL_POLL_S = 30
     print("  OK", flush=True)
 
     srv.shutdown()
