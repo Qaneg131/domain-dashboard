@@ -111,7 +111,7 @@ class MockHandler(BaseHTTPRequestHandler):
                     and parts[6] == "http_request_cache_settings" and parts[7] == "entrypoint":
                 rs = STATE["rulesets"].get(zid)
                 if rs is None:
-                    self._cf_err("ruleset not found", 404)
+                    self._cf_err("The ruleset does not exist.", 404)
                 else:
                     self._json(self._cf_ok(rs))
                 return
@@ -263,7 +263,7 @@ class MockHandler(BaseHTTPRequestHandler):
             zid = parts[3]
             rs = STATE["rulesets"].get(zid)
             if rs is None:
-                self._cf_err("ruleset not found", 404)
+                self._cf_err("The ruleset does not exist.", 404)
                 return
             rs["rules"] = body.get("rules", rs["rules"])
             self._json(self._cf_ok(rs))
@@ -633,6 +633,15 @@ def main():
     except Exception as e:
         assert "9.9.9.9" in str(e) and "whitelist" in str(e), e
         print("  OK:", str(e)[:100], flush=True)
+
+    print("TEST 24: zone chua co ruleset cache — 404 that ('The ruleset does not exist.') phai tra None, khong phai loi quyen...", flush=True)
+    z8 = cf.get_zone("elvellia.com")
+    assert cf.get_cache_ruleset(z8["id"]) is None
+    assert cf.has_cache_bypass(z8["id"]) is False
+    st24 = dash.check_domain("elvellia.com", cfg6)
+    assert st24["cache_bypass"] is False, st24
+    assert not st24.get("cache_error"), st24
+    print("  OK", flush=True)
 
     srv.shutdown()
     print("ALL TESTS PASSED")

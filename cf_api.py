@@ -17,7 +17,9 @@ BASE = "https://api.cloudflare.com/client/v4"
 
 
 class CFError(Exception):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status  # HTTP status (404, 403...) neu co; None neu khong ro
 
 
 def expand_name(zone_name, name):
@@ -53,7 +55,7 @@ class CFClient:
                 msg = "; ".join(x.get("message", "") for x in errs) or f"HTTP {e.code}"
             except Exception:
                 msg = f"HTTP {e.code}"
-            raise CFError(msg)
+            raise CFError(msg, status=e.code)
         except urllib.error.URLError as e:
             raise CFError(f"khong noi duoc Cloudflare API: {e.reason}")
 
@@ -256,15 +258,18 @@ class CFClient:
     # --------------------------------------------------- cache rules (bypass)
     def get_cache_ruleset(self, zone_id):
         """Ruleset phase http_request_cache_settings (entrypoint) hoac None
-        neu chua co rule nao. Can quyen Zone Rulesets tren token."""
+        neu chua co rule nao. Can quyen Zone Cache Rules (Edit) tren token
+        (+ Account Rulesets/Filter Lists theo tai lieu Cloudflare)."""
         try:
             payload = self._req(
                 "GET", f"/zones/{zone_id}/rulesets/phases/"
                        f"http_request_cache_settings/entrypoint")
             return self._ok(payload)
         except CFError as e:
-            # Chua co ruleset nao o phase nay -> 404 / 'not found'.
-            if "404" in str(e) or "not found" in str(e).lower():
+            # Chua co ruleset nao o phase nay -> HTTP 404. KHONG doan bang
+            # chu trong message: API that tra 'The ruleset does not
+            # exist.' (khong co '404'/'not found') nen phai dung status.
+            if e.status == 404 or "not found" in str(e).lower():
                 return None
             raise
 
