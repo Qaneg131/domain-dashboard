@@ -67,6 +67,14 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   nữa: record giống hệt preset thì giữ, record trùng tên/loại nhưng khác
   nội dung thì xóa cái cũ rồi thêm mới, record khác (không nằm trong
   preset) giữ nguyên. Setup mà chưa chọn preset thì báo lỗi, không xóa gì.
+- **Cột Record hiện tên preset, không khớp thì để trống** — check so
+  record với **mọi preset đã thêm** (preset mặc định trước): domain nào
+  khớp preset "Web Hân" thì cột hiện "✓ Web Hân", khớp "Web Long" thì
+  hiện "✓ Web Long" (kèm số record). Không khớp preset nào (kể cả chưa
+  có record) thì **để trống** — record để trống được, cần thì set sau
+  vì nhiều loại web cần record khác nhau. Bộ lọc cột Record cũng có
+  thêm từng tên preset (Web Hân, Web Long...) để lọc domain theo preset
+  mà record của nó khớp.
 - **Email preset + Setup email ở bảng home** — không còn tab mail riêng:
   card **Email preset** (rule forward) nằm ngay ở trang chính, dưới card
   HTTPS preset. Muốn setup email thì tick chọn domain ở bảng quản lý rồi

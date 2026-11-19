@@ -943,6 +943,39 @@ def main():
         _time.sleep = orig_sleep
     print("  OK", flush=True)
 
+    print("TEST 38: _records_preset_match — so voi MOI preset, tra ten preset khop...", flush=True)
+    cfg38 = dict(cfg)
+    cfg38["presets"] = {
+        "web": [{"type": "A", "name": "@", "content": "1.11.11.11", "proxied": True},
+                {"type": "A", "name": "www", "content": "1.11.11.11", "proxied": True}],
+        "Web Long": [{"type": "A", "name": "@", "content": "2.22.22.22", "proxied": True},
+                     {"type": "A", "name": "www", "content": "2.22.22.22", "proxied": True}],
+    }
+    cfg38["default_preset"] = "web"
+    recs_web = [{"type": "A", "name": "preset38.com", "content": "1.11.11.11"},
+                {"type": "A", "name": "www.preset38.com", "content": "1.11.11.11"}]
+    recs_long = [{"type": "A", "name": "preset38.com", "content": "2.22.22.22"},
+                 {"type": "A", "name": "www.preset38.com", "content": "2.22.22.22"}]
+    assert dash._records_preset_match(recs_web, cfg38, "preset38.com") == "web"
+    assert dash._records_preset_match(recs_long, cfg38, "preset38.com") == "Web Long"
+    assert dash._records_preset_match([], cfg38, "preset38.com") is None
+    assert dash._records_preset_match(
+        [{"type": "A", "name": "preset38.com", "content": "9.9.9.9"}], cfg38, "preset38.com") is None
+    # check_domain: record khop preset khong phai mac dinh thi van tra ten.
+    z38, _c = cf.get_or_create_zone("preset38.com")
+    cf.create_record(z38["id"], "A", "preset38.com", "2.22.22.22", True)
+    cf.create_record(z38["id"], "A", "www.preset38.com", "2.22.22.22", True)
+    STATE["nc_ns"]["preset38.com"] = [NS1, NS2]
+    st38 = dash.check_domain("preset38.com", cfg38)
+    assert st38["records_preset"] == "Web Long" and st38["records_ok"] is True, st38
+    # Record khong khop preset nao -> records_preset None, records_ok False.
+    z38b, _c = cf.get_or_create_zone("preset38b.com")
+    cf.create_record(z38b["id"], "A", "preset38b.com", "9.9.9.9", True)
+    STATE["nc_ns"]["preset38b.com"] = [NS1, NS2]
+    st38b = dash.check_domain("preset38b.com", cfg38)
+    assert st38b["records_preset"] is None and st38b["records_ok"] is False, st38b
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

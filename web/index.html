@@ -397,6 +397,21 @@ function renderPresets() {
   sel.innerHTML = names.map(n => `<option value="${esc(n)}" ${n === cfg.default_preset ? 'selected' : ''}>${esc(n)}</option>`).join('');
   document.getElementById('presetDefaultLabel').textContent = 'Mặc định: ' + (cfg.default_preset || '(chưa có)');
   loadPresetIntoEditor();
+  renderRecFilter();
+}
+function renderRecFilter() {
+  // Bo loc cot Record them tuy chon theo tung preset da them (Web Han,
+  // Web Long...) de loc domain theo preset ma record cua no khop.
+  const sel = document.getElementById('fltRec');
+  if (!sel) return;
+  const cur = sel.value || '';
+  const names = Object.keys((STATE.config || {}).presets || {});
+  sel.innerHTML = '<option value="">Tất cả</option>'
+    + '<option value="match">Khớp preset ✓</option>'
+    + '<option value="nomatch">Chưa khớp</option>'
+    + '<option value="unknown">Chưa kiểm tra</option>'
+    + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.value = names.includes(cur) || ['match', 'nomatch', 'unknown', ''].includes(cur) ? cur : '';
 }
 
 function presetEditorRows(recs) {
@@ -625,10 +640,15 @@ function managedRow(d) {
     else if (zi) dnsCell = `<span class="badge ${zi.status === 'active' ? 'ok' : 'wait'}">${esc(zi.status)}</span><br><span class="mono">${(zi.name_servers || []).map(esc).join('<br>')}</span><br><span class="muted">chưa kiểm tra chi tiết</span>`;
     else dnsCell = '<span class="muted">—</span>';
     const recs = s.records || [];
+    // Cot Record chi hien ten preset ma record khop (so voi MOI preset);
+    // khong khop preset nao (ke ca 0 record) thi de trong — record de
+    // trong duoc, can thi set sau. Trang thai cu (chua co records_preset)
+    // thi dung ten preset mac dinh lam ten hien.
+    const recPreset = s.records_preset || (s.records_ok ? (STATE.config.default_preset || 'khớp preset') : '');
     const recCell = !zone ? '<span class="muted">—</span>'
       : s.light ? '<span class="muted">chưa kiểm tra</span>'
-      : recs.length === 0 ? '<span class="badge no">No</span><br><span class="muted">0 record</span>'
-      : yesNo(true) + `<br><span class="muted">${recs.length} record${s.records_ok ? ' ✓ khớp preset' : ''}</span>`;
+      : recPreset ? `<span class="badge ok">✓ ${esc(recPreset)}</span><br><span class="muted">${recs.length} record</span>`
+      : '';
     const em = s.email;
     const emCell = !zone ? '<span class="muted">—</span>'
       : s.light ? '<span class="muted">chưa kiểm tra</span>'
@@ -673,9 +693,16 @@ function matchesFilters(d) {
   }
   const rec = flt('fltRec');
   if (rec) {
+    // Gia tri co the la match / nomatch / unknown, hoac ten preset cu the
+    // (Web Han, Web Long...) — chi hien domain khop dung preset do.
+    const presetName = s.records_preset || (s.records_ok ? (STATE.config.default_preset || '') : '');
     const state = !st || !zone || s.records_ok === null || s.records_ok === undefined ? 'unknown'
       : s.records_ok ? 'match' : 'nomatch';
-    if (state !== rec) return false;
+    if (rec === 'match' || rec === 'nomatch' || rec === 'unknown') {
+      if (state !== rec) return false;
+    } else if (presetName !== rec) {
+      return false;
+    }
   }
   const em = flt('fltEm');
   if (em) {

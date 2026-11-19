@@ -78,6 +78,23 @@ def _records_match(records, preset, domain):
     return want and want <= have
 
 
+def _records_preset_match(records, cfg, domain):
+    """Ten preset ma record hien co khop (so voi MOI preset, preset mac
+    dinh truoc) — khong khop preset nao thi None. Nhieu loai web nen
+    record co the de trong / khac preset, de trong la duoc."""
+    presets = cfg.get("presets", {}) or {}
+    ordered = []
+    default = cfg.get("default_preset", "")
+    if default in presets:
+        ordered.append(default)
+    ordered.extend(n for n in presets if n != default)
+    for name in ordered:
+        preset = presets.get(name) or []
+        if preset and _records_match(records, preset, domain):
+            return name
+    return None
+
+
 def check_domain(domain, cfg, skip_nc=False):
     """Trang thai 1 domain: zone CF, NS (DNS cong + Namecheap), records.
     skip_nc=True (kiem tra theo loat): bo qua luon goi Namecheap API —
@@ -87,6 +104,7 @@ def check_domain(domain, cfg, skip_nc=False):
     st = {"domain": domain, "checked_at": time.strftime("%H:%M:%S %d/%m/%Y"),
           "zone": None, "doh_ns": [], "registrar_ns": [],
           "ns_ok": False, "records": [], "records_ok": None,
+          "records_preset": None,
           "email": None, "https": None, "error": None}
     try:
         if not cfg.get("cf_token"):
@@ -122,9 +140,10 @@ def check_domain(domain, cfg, skip_nc=False):
                                   "proxied": r.get("proxied"),
                                   "locked": bool(r.get("locked"))}
                                  for r in cf.list_records(st["zone"]["id"])]
-                preset = cfg.get("presets", {}).get(cfg.get("default_preset", ""), [])
-                if preset:
-                    st["records_ok"] = _records_match(st["records"], preset, domain)
+                matched = _records_preset_match(st["records"], cfg, domain)
+                st["records_preset"] = matched
+                if cfg.get("presets"):
+                    st["records_ok"] = matched is not None
             except Exception as e:
                 st["error"] = f"khong doc duoc records: {e}"
             # Email Routing + HTTPS (can quyen Zone Settings / Email Routing
@@ -682,6 +701,7 @@ def _check_dns_light(domains, cfg, st):
         light = {"domain": d, "checked_at": time.strftime("%H:%M:%S %d/%m/%Y"),
                  "zone": None, "doh_ns": [], "registrar_ns": [],
                  "ns_ok": False, "records": [], "records_ok": None,
+                 "records_preset": None,
                  "email": None, "https": None, "error": None, "light": True}
         z = zones.get(d)
         if z:
