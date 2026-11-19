@@ -63,19 +63,22 @@ NS sẽ báo "chưa cấu hình Namecheap API".
 - **Bảng tổng quan** — mỗi domain 1 dòng: DNS (NS đã trỏ đúng chưa, check
   bằng DNS thật), Record (có record không, có khớp preset không),
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
-- **Tab "Setup email"** — chỉ hiện domain có zone đã **active** (zone pending
-  thì Cloudflare không cho bật Email Routing nên không cho set ở đây). Mỗi
-  dòng hiện đủ 2 trạng thái như trên Cloudflare: **Routing status**
-  (Enabled/Disabled + số rule) và **DNS records** (Locked khi record MX/SPF/
-  DKIM của Email Routing đang bị khóa, Unlocked khi chưa). Mỗi dòng có nút
-  "Setup email" (chỉ chạy bước Email Routing: bật routing + áp rule theo
-  email preset) và nút "Setup email tất cả (active)".
-- **Google Search Console** — mục riêng trong popup Edit, và nút riêng
-  ngoài trang (cạnh các tab) bấm là mở popup mới: chọn domain, dán mã
-  xác minh lấy tay từ Search Console, bấm "Thêm record TXT" để thêm
-  record TXT @ `google-site-verification=...` (nhập tay, tool không tự
-  lấy được; dán cả mã đầy đủ hoặc chỉ phần mã đều được). Record này được
-  giữ lại khi áp preset / Setup, không bị xóa cùng record cũ.
+- **Áp preset kiểu gộp (merge)** — Setup / Áp record KHÔNG xóa hết record cũ
+  nữa: record giống hệt preset thì giữ, record trùng tên/loại nhưng khác
+  nội dung thì xóa cái cũ rồi thêm mới, record khác (không nằm trong
+  preset) giữ nguyên. Setup mà chưa chọn preset thì báo lỗi, không xóa gì.
+- **Tab "Setup email"** — là tab mail riêng: chứa mục Email preset (rule
+  forward) + bảng chỉ hiện domain có zone đã **active**. Mỗi dòng hiện đủ
+  2 trạng thái: **Routing status** (Enabled/Disabled + số rule) và **DNS
+  records** (Locked khi record MX/SPF/DKIM đang bị khóa). Mỗi dòng có nút
+  "Setup email" (chỉ chạy bước Email Routing) và nút "Setup email tất cả
+  (active)". Đồng bộ rule: rule giống hệt thì giữ, rule trùng y hệt thì
+  xóa bớt, rule cùng địa chỉ nhưng khác đích thì thay bằng rule preset,
+  rule của địa chỉ khác giữ nguyên.
+- **Bảng quản lý** — bỏ tab "Tất cả trong tài khoản", hiện hết domain
+  (đang quản lý + trong tài khoản) ngay ngoài trang quản lý, có thanh
+  tìm kiếm lọc cả 2 loại, phân trang 5 domain/trang. Domain chưa trong
+  bảng có nút "Thêm" (thêm xong tự kiểm tra trạng thái ngay).
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo

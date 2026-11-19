@@ -169,6 +169,24 @@ def main():
     print("GSC OK: them TXT @, trung thi giu, domain-detail hien dung", flush=True)
     print("EMAIL TAB OK: routing Enabled + DNS records Locked hien dung", flush=True)
 
+    # Ap preset kieu gop: record tu do (khong nam trong preset) phai con.
+    det7 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    recs7 = [{"type": r["type"], "name": r["name"], "content": r["content"],
+              "proxied": r["proxied"]} for r in det7["records"]
+             if not r["content"].endswith(".mx.cloudflare.net")
+             and "include:_spf.mx.cloudflare.net" not in r["content"]
+             and "DKIM1" not in r["content"]]
+    recs7.append({"type": "TXT", "name": "@", "content": "custom-keep=1", "proxied": False})
+    sr = call("POST", "/api/set-records", {"domain": "batch1.com", "records": recs7})
+    assert sr["ok"], sr
+    ar2 = call("POST", "/api/apply-records-batch", {"domains": ["batch1.com"], "preset": "web"})
+    assert ar2["ok"], ar2
+    det8 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    assert any(r["type"] == "TXT" and r["content"] == "custom-keep=1" for r in det8["records"]), det8["records"]
+    # set-records khong lam trung record he thong Email Routing.
+    assert sum(1 for r in det8["records"] if r["type"] == "MX") == 3, det8["records"]
+    print("MERGE OK: ap preset giu lai record tu do, khong trung MX", flush=True)
+
     # Tab Setup email: chi chay buoc email (da co san thi giu nguyen).
     se = call("POST", "/api/setup-email", {"domain": "batch1.com"})
     assert se["ok"], se

@@ -89,21 +89,8 @@
     <div class="row">
       <button class="secondary small" onclick="addPresetRow()">+ Thêm record</button>
       <button onclick="savePreset()">Lưu preset</button>
-      <span class="muted">VD preset "web": A @ → IP, A www → IP. Áp preset sẽ xóa hết record cũ rồi thêm mới.</span>
+      <span class="muted">VD preset "web": A @ → IP, A www → IP. Áp preset chỉ cập nhật record trùng tên/loại, record khác giữ nguyên.</span>
     </div>
-  </div>
-
-  <div class="card">
-    <h2>Email preset — rule forward áp trong lúc Setup</h2>
-    <p class="hint">Setup sẽ bật Email Routing rồi tạo các rule này (rule nào có sẵn giống hệt thì giữ).
-    <b>info@</b> nghĩa là info@&lt;domain đang setup&gt;, <b>*</b> là catch-all. Địa chỉ nhận phải bấm link xác minh trong mail thì rule mới forward được.</p>
-    <div class="row">
-      <label style="min-width:0"><input type="checkbox" id="emailPresetEnabled" checked> Bật email trong lúc Setup</label>
-      <button onclick="saveEmailPreset()">Lưu email preset</button>
-      <span class="muted" id="emailPresetMsg"></span>
-    </div>
-    <div id="emailPresetRows"></div>
-    <div class="row"><button class="secondary small" onclick="addEmailPresetRow()">+ Thêm rule</button></div>
   </div>
 
   <div class="card">
@@ -142,7 +129,6 @@
     <h2>Domains</h2>
     <div class="row">
       <button id="tabManaged" onclick="showDomainTab('managed')">Danh sách quản lý</button>
-      <button class="secondary" id="tabAccount" onclick="showDomainTab('account')">Tất cả trong tài khoản</button>
       <button class="secondary" id="tabEmail" onclick="showDomainTab('email')">Setup email</button>
       <button class="secondary" onclick="openGscModal()">Google Search Console</button>
     </div>
@@ -150,6 +136,7 @@
     <div class="row">
       <input type="text" id="newDomain" placeholder="vd: elvellia.com (Enter để thêm)" style="max-width:300px">
       <button onclick="addDomain()">Thêm domain</button>
+      <input type="text" id="domainSearch" placeholder="Tìm domain…" style="max-width:300px" oninput="MANAGED_PAGE=1;renderTable()">
       <button class="secondary" onclick="checkAll()">Kiểm tra tất cả</button>
       <button onclick="setupAll()">Setup tất cả (preset mặc định)</button>
       <span class="muted" id="domainCount"></span>
@@ -172,20 +159,20 @@
       <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr></thead>
       <tbody id="domainTable"><tr><td colspan="8" class="muted">Đang tải…</td></tr></tbody>
     </table>
-    </div>
-    <div id="accountTab" style="display:none">
-      <div class="row">
-        <input type="text" id="accountSearch" placeholder="Tìm domain trong tài khoản…" style="max-width:300px" oninput="renderAccountZones()">
-        <button class="secondary" onclick="loadAccountZones()">Tải lại danh sách</button>
-        <span class="muted" id="accountCount"></span>
-      </div>
-      <table>
-        <thead><tr><th>Name</th><th>Status</th><th>Nameserver</th><th></th></tr></thead>
-        <tbody id="accountTable"><tr><td colspan="4" class="muted">Bấm "Tải lại danh sách" để xem hết domain trong tài khoản Cloudflare.</td></tr></tbody>
-      </table>
-      <p class="hint">Tab này chỉ liệt kê — bấm "Thêm" để đưa domain vào bảng quản lý rồi mới Setup. Sửa tay: đổi tên/IP preset ở mục Preset record / Email preset, hoặc bấm Edit ở bảng quản lý.</p>
+    <div class="row" id="pager"></div>
     </div>
     <div id="emailTab" style="display:none">
+      <h3>Email preset — rule forward áp trong lúc Setup</h3>
+      <p class="hint">Setup sẽ bật Email Routing rồi tạo các rule này (rule nào có sẵn giống hệt thì giữ, rule trùng thì xóa bớt, rule của địa chỉ khác giữ nguyên).
+      <b>info@</b> nghĩa là info@&lt;domain đang setup&gt;, <b>*</b> là catch-all. Địa chỉ nhận phải bấm link xác minh trong mail thì rule mới forward được.</p>
+      <div class="row">
+        <label style="min-width:0"><input type="checkbox" id="emailPresetEnabled" checked> Bật email trong lúc Setup</label>
+        <button onclick="saveEmailPreset()">Lưu email preset</button>
+        <span class="muted" id="emailPresetMsg"></span>
+      </div>
+      <div id="emailPresetRows"></div>
+      <div class="row"><button class="secondary small" onclick="addEmailPresetRow()">+ Thêm rule</button></div>
+      <hr>
       <div class="row">
         <button class="secondary" onclick="checkAll()">Kiểm tra trạng thái</button>
         <button onclick="setupEmailAllActive()">Setup email tất cả (active)</button>
@@ -375,6 +362,9 @@ async function refresh() {
   renderHttpsPreset();
   renderTable();
   renderEmailTab();
+  // Tai danh sach domain trong tai khoan de hien chung o bang quan ly
+  // (chi tai 1 lan; loi thi im lang — bang quan ly van chay duoc).
+  if (!ACCOUNT_ZONES.length) loadAccountZones(true);
 }
 
 function renderPresets() {
@@ -539,12 +529,9 @@ async function addBatchToManaged() {
 let ACCOUNT_ZONES = [];
 function showDomainTab(which) {
   document.getElementById('managedTab').style.display = which === 'managed' ? '' : 'none';
-  document.getElementById('accountTab').style.display = which === 'account' ? '' : 'none';
   document.getElementById('emailTab').style.display = which === 'email' ? '' : 'none';
   document.getElementById('tabManaged').className = which === 'managed' ? '' : 'secondary';
-  document.getElementById('tabAccount').className = which === 'account' ? '' : 'secondary';
   document.getElementById('tabEmail').className = which === 'email' ? '' : 'secondary';
-  if (which === 'account' && !ACCOUNT_ZONES.length) loadAccountZones();
   if (which === 'email') {
     renderEmailTab();
     // Chua co trang thai thi tu kiem tra luon de biet domain nao active.
@@ -606,30 +593,16 @@ async function setupEmailAllActive() {
   showDiagnosis(results);
   await refresh();
 }
-async function loadAccountZones() {
+async function loadAccountZones(quiet) {
   const res = await api('/api/account-zones');
-  if (res.error) { alert(res.error); return; }
+  if (res.error) { if (!quiet) alert(res.error); return; }
   ACCOUNT_ZONES = res.zones || [];
-  renderAccountZones();
-}
-function renderAccountZones() {
-  const q = (document.getElementById('accountSearch').value || '').toLowerCase();
-  const zones = ACCOUNT_ZONES.filter(z => !q || z.name.toLowerCase().includes(q));
-  document.getElementById('accountCount').textContent = zones.length + ' / ' + ACCOUNT_ZONES.length + ' domain';
-  const tb = document.getElementById('accountTable');
-  const managed = new Set(STATE.config.domains || []);
-  tb.innerHTML = zones.length ? zones.map(z => `<tr>
-    <td><b>${esc(z.name)}</b></td>
-    <td><span class="badge ${z.status === 'active' ? 'ok' : 'wait'}">${esc(z.status)}</span></td>
-    <td><span class="mono">${(z.name_servers || []).map(esc).join('<br>')}</span></td>
-    <td>${managed.has(z.name) ? '<span class="muted">đã trong bảng</span>'
-      : `<button class="small secondary" onclick="addZoneToManaged('${esc(z.name)}')">Thêm</button>`}</td>
-  </tr>`).join('') : '<tr><td colspan="4" class="muted">Không tìm thấy domain nào.</td></tr>';
+  renderTable();
 }
 async function addZoneToManaged(d) {
   await api('/api/domains', { domain: d });
   await refresh();
-  renderAccountZones();
+  renderTable();
   // Tu dong kiem tra trang thai ngay — khoi phai bam "Kiem tra tat ca".
   const res = await api('/api/check', { domain: d });
   STATE.status = { ...STATE.status, ...res.status };
@@ -657,13 +630,12 @@ async function getMyIp() {
 
 function yesNo(v) { return v ? '<span class="badge ok">Yes</span>' : '<span class="badge no">No</span>'; }
 
-function renderTable() {
-  const cfg = STATE.config || {};
-  const domains = cfg.domains || [];
-  document.getElementById('domainCount').textContent = domains.length + ' domain';
-  const tb = document.getElementById('domainTable');
-  if (!domains.length) { tb.innerHTML = '<tr><td colspan="8" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
-  tb.innerHTML = domains.map(d => {
+// Bang quan ly hien ca domain dang quan ly (co checkbox, trang thai day
+// du) + domain trong tai khoan chua dua vao bang (chi zone status + NS,
+// nut Them). Tim kiem loc ca 2 loai, phan trang 5 domain/trang.
+const PAGE_SIZE = 5;
+let MANAGED_PAGE = 1;
+function managedRow(d) {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
     const dnsCell = s.error && !zone ? `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`
@@ -694,9 +666,62 @@ function renderTable() {
         <button class="small" onclick="setupOne('${esc(d)}')">Setup</button>
         <button class="small warn" onclick="removeDomain('${esc(d)}')">✕</button>
       </td></tr>`;
-  }).join('');
+}
+function accountRow(z) {
+  return `<tr>
+      <td></td>
+      <td><b>${esc(z.name)}</b><br><span class="muted">chưa trong bảng quản lý</span></td>
+      <td><span class="badge ${z.status === 'active' ? 'ok' : 'wait'}">${esc(z.status)}</span><br><span class="mono">${(z.name_servers || []).map(esc).join('<br>')}</span></td>
+      <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
+      <td style="white-space:nowrap"><button class="small secondary" onclick="addZoneToManaged('${esc(z.name)}')">Thêm</button></td></tr>`;
+}
+function renderTable() {
+  const cfg = STATE.config || {};
+  const domains = cfg.domains || [];
+  const q = (document.getElementById('domainSearch').value || '').toLowerCase();
+  const managed = new Set(domains);
+  const all = [
+    ...domains.filter(d => !q || d.toLowerCase().includes(q))
+      .map(d => ({ kind: 'managed', name: d })),
+    ...(ACCOUNT_ZONES || [])
+      .filter(z => !managed.has(z.name) && (!q || z.name.toLowerCase().includes(q)))
+      .map(z => ({ kind: 'account', zone: z })),
+  ];
+  document.getElementById('domainCount').textContent =
+    `${domains.length} domain quản lý · ${ACCOUNT_ZONES.length} domain trong tài khoản`;
+  const tb = document.getElementById('domainTable');
+  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  if (MANAGED_PAGE > totalPages) MANAGED_PAGE = totalPages;
+  if (MANAGED_PAGE < 1) MANAGED_PAGE = 1;
+  const pageRows = all.slice((MANAGED_PAGE - 1) * PAGE_SIZE, MANAGED_PAGE * PAGE_SIZE);
+  tb.innerHTML = pageRows.length ? pageRows.map(r =>
+    r.kind === 'managed' ? managedRow(r.name) : accountRow(r.zone)).join('')
+    : '<tr><td colspan="8" class="muted">Không tìm thấy domain nào.</td></tr>';
+  renderPager(totalPages, all.length);
+  document.getElementById('checkAll').checked = false;
   updateSelectedCount();
 }
+function renderPager(totalPages, totalRows) {
+  const el = document.getElementById('pager');
+  if (totalPages <= 1) {
+    el.innerHTML = `<span class="muted">${totalRows} domain</span>`;
+    return;
+  }
+  const p = MANAGED_PAGE;
+  const nums = [...new Set([1, p - 1, p, p + 1, totalPages]
+    .filter(n => n >= 1 && n <= totalPages))].sort((a, b) => a - b);
+  let html = `<button class="secondary small" ${p === 1 ? 'disabled' : ''} onclick="gotoPage(${p - 1})">← Trước</button>`;
+  let prev = 0;
+  for (const n of nums) {
+    if (n - prev > 1) html += '<span class="muted">…</span>';
+    html += `<button class="small ${n === p ? '' : 'secondary'}" onclick="gotoPage(${n})">${n}</button>`;
+    prev = n;
+  }
+  html += `<button class="secondary small" ${p === totalPages ? 'disabled' : ''} onclick="gotoPage(${p + 1})">Sau →</button>`;
+  html += `<span class="muted">Trang ${p}/${totalPages} · ${totalRows} domain</span>`;
+  el.innerHTML = html;
+}
+function gotoPage(n) { MANAGED_PAGE = n; renderTable(); }
 
 // ---------------------------------------------------------------- chon nhieu domain
 function selectedDomains() {

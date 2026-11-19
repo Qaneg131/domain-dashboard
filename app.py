@@ -341,11 +341,20 @@ def _apply_email_preset(domain, cfg, cf, zone):
             vals = [m.get("value", "") for m in mts if m.get("value")]
             return vals[0] if vals else ""
 
+        def rule_dests(rule):
+            dests = []
+            for a in rule.get("actions") or []:
+                dests.extend(a.get("value") or [])
+            return dests
+
         # Catch-all khong nam trong existing_by_match — no duoc xu ly
         # rieng qua endpoint /rules/catch_all (xoa/tap qua /rules/{id}
         # se bi API tra 'Invalid rule operation').
-        existing_by_match = {match_key(r): r for r in existing
-                             if match_key(r) != "*"}
+        existing_by_match = {}
+        for r in existing:
+            k = match_key(r)
+            if k != "*":
+                existing_by_match.setdefault(k, []).append(r)
         for r in rules:
             match = _expand_email_match(domain, r["match"])
             dests = [x.strip() for x in str(r["to"]).split(",") if x.strip()]
@@ -368,20 +377,28 @@ def _apply_email_preset(domain, cfg, cf, zone):
                 steps.append({"step": f"Rule * (catch-all) -> {dests[0]}",
                               "ok": True, "detail": detail})
                 continue
-            cur = existing_by_match.get(match)
-            cur_dests = []
-            if cur:
-                for a in cur.get("actions") or []:
-                    cur_dests.extend(a.get("value") or [])
-            if cur and sorted(cur_dests) == sorted(dests):
-                steps.append({"step": f"Rule {match}", "ok": True,
-                              "detail": "da co san"})
+            cands = existing_by_match.get(match, [])
+            same = [c for c in cands
+                    if sorted(rule_dests(c)) == sorted(dests)]
+            if same:
+                # Giu 1 rule giong het, xoa cac rule trung y het (neu co).
+                for dup in same[1:]:
+                    cf.delete_email_rule(zone["id"], dup["id"])
+                detail = "da co san"
+                if len(same) > 1:
+                    detail += f" (da xoa {len(same) - 1} rule trung)"
+                steps.append({"step": f"Rule {match}", "ok": True, "detail": detail})
                 continue
-            if cur:
-                cf.delete_email_rule(zone["id"], cur["id"])
+            # Cung dia chi nhan khac dich -> xoa het rule cu cung dia chi
+            # roi tao moi theo preset; rule cua dia chi khac giu nguyen.
+            for c in cands:
+                cf.delete_email_rule(zone["id"], c["id"])
             cf.create_email_rule(zone["id"], match, dests)
+            detail = "da tao"
+            if cands:
+                detail += f" (da xoa {len(cands)} rule cu cung dia chi)"
             steps.append({"step": f"Rule {match} -> {', '.join(dests)}",
-                          "ok": True, "detail": "da tao"})
+                          "ok": True, "detail": detail})
         return steps, True
     except Exception as e:
         detail = str(e)
@@ -400,6 +417,60 @@ def _get_zone_or_error(domain, cfg):
     if not zone:
         return cf, None, "chua co zone tren Cloudflare — bam Setup truoc"
     return cf, zone, None
+
+
+def _sync_records(domain, records, cf, zone):
+    """Ap record theo kieu gop (merge), KHONG xoa het record cu.
+    - record giong het (type+name+content+proxied) -> giu
+    - record cung type+name nhung khac content/proxied -> xoa cai cu
+      roi them moi (day la 'record trung')
+    - record khac (khong nam trong danh sach) -> GIU NGUYEN
+    Tra ve (detail, ok). Dung cho Setup, Ap record, Ap record loat."""
+    try:
+        existing = cf.list_records(zone["id"])
+        by_key = {}
+        for r in existing:
+            # Chuan hoa ten ve FQDN (API that tra ten day du; mock tra
+            # ten ngan '@'/'www') de so sanh khop voi preset.
+            by_key.setdefault(((r.get("type") or "").upper(),
+                               expand_name(domain, r.get("name") or "").lower()),
+                              []).append(r)
+        kept = updated = added = deleted = 0
+        for r in records:
+            typ = str(r.get("type", "A")).upper()
+            name = expand_name(domain, r.get("name", ""))
+            content = str(r.get("content", "")).strip()
+            proxied = bool(r.get("proxied", True))
+            if not content:
+                continue
+            key = (typ, name.lower())
+            cur = by_key.get(key, [])
+            same = [x for x in cur
+                    if str(x.get("content", "")).strip() == content
+                    and bool(x.get("proxied", False)) == proxied]
+            if same:
+                kept += 1
+                for x in cur:
+                    if x is not same[0]:
+                        cf.delete_record(zone["id"], x["id"])
+                        deleted += 1
+                by_key[key] = [same[0]]
+                continue
+            for x in cur:
+                cf.delete_record(zone["id"], x["id"])
+                deleted += 1
+            by_key[key] = []
+            cf.create_record(zone["id"], typ, name, content, proxied)
+            if cur:
+                updated += 1
+            else:
+                added += 1
+        detail = (f"giu {kept} record giong het, cap nhat {updated}, "
+                  f"them {added} record moi, da xoa {deleted} record trung "
+                  "— cac record khac giu nguyen")
+        return detail, True
+    except Exception as e:
+        return str(e), False
 
 
 def setup_domain(domain, preset_name, cfg):
@@ -435,37 +506,25 @@ def setup_domain(domain, preset_name, cfg):
     if not ns_ok:
         return {"domain": domain, "ok": False, "steps": steps}
 
-    # 3. Xoa het record cu (LUON chay khi Setup — theo yeu cau cua user:
-    # domain nao dem di setup thi tu dong xoa record cu) + ap preset neu co.
-    # delete_all_records GIU LAI record he thong cua Email Routing (MX/SPF/
-    # DKIM cua Cloudflare) nen khong lam hong email da bat; MX cua nha
-    # cung cap cu thi bi xoa — nho vay buoc Email Routing moi bat duoc
-    # (khong thi loi 2008 'Non-Cloudflare MX records exist').
-    try:
-        deleted = cf.delete_all_records(zone["id"])
-        if preset_name:
-            preset = cfg.get("presets", {}).get(preset_name)
-            if not preset:
-                step("Xoa record cu", False,
-                     f"da xoa {deleted} record cu nhung preset '{preset_name}' "
-                     "khong ton tai — vao muc Preset record de tao/chon preset "
-                     "mac dinh roi Setup lai")
-            else:
-                added = 0
-                for r in preset:
-                    cf.create_record(zone["id"], r["type"].upper(),
-                                     expand_name(domain, r.get("name", "")),
-                                     str(r.get("content", "")).strip(),
-                                     bool(r.get("proxied", True)))
-                    added += 1
-                step(f"Ap preset '{preset_name}'", True,
-                     f"da xoa {deleted} record cu, them {added} record moi")
-        else:
-            step("Xoa record cu", False,
-                 f"da xoa {deleted} record cu nhung chua chon preset mac dinh "
-                 "— vao muc Preset record de chon preset mac dinh roi Setup lai")
-    except Exception as e:
-        step("Xoa record cu / Ap preset", False, str(e))
+    # 3. Ap preset record theo kieu gop (KHONG xoa het record cu nua):
+    # chi xoa record trung (cung type+name, khac noi dung), record khac
+    # giu nguyen — tranh mat record tu do (vd domain 9 record, xoa het
+    # roi ap lai chi con 7).
+    if preset_name:
+        preset = cfg.get("presets", {}).get(preset_name)
+        if not preset:
+            step(f"Ap preset '{preset_name}'", False,
+                 f"preset '{preset_name}' khong ton tai — vao muc Preset "
+                 "record de tao/chon preset mac dinh roi Setup lai")
+            return {"domain": domain, "ok": False, "steps": steps}
+        detail, ok3 = _sync_records(domain, preset, cf, zone)
+        step(f"Ap preset '{preset_name}'", ok3, detail)
+        if not ok3:
+            return {"domain": domain, "ok": False, "steps": steps}
+    else:
+        step("Ap preset", False,
+             "chua chon preset mac dinh — vao muc Preset record de chon "
+             "preset mac dinh roi Setup lai")
         return {"domain": domain, "ok": False, "steps": steps}
 
     # 4. Email routing theo preset (sau records de MX/SPF/DKIM khong bi xoa).
@@ -506,16 +565,9 @@ def apply_preset(domain, preset_name, cfg):
         if not zone:
             return {"domain": domain, "ok": False, "steps": [
                 {"step": "Tim zone", "ok": False, "detail": "chua co zone tren Cloudflare — bam Setup truoc"}]}
-        deleted = cf.delete_all_records(zone["id"])
-        added = 0
-        for r in preset:
-            cf.create_record(zone["id"], r["type"].upper(),
-                             expand_name(domain, r.get("name", "")),
-                             str(r.get("content", "")).strip(), bool(r.get("proxied", True)))
-            added += 1
-        return {"domain": domain, "ok": True, "steps": [
-            {"step": f"Ap preset '{preset_name}'", "ok": True,
-             "detail": f"da xoa {deleted} record cu, them {added} record moi"}]}
+        detail, ok = _sync_records(domain, preset, cf, zone)
+        return {"domain": domain, "ok": ok, "steps": [
+            {"step": f"Ap preset '{preset_name}'", "ok": ok, "detail": detail}]}
     except Exception as e:
         return {"domain": domain, "ok": False, "steps": [
             {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": str(e)}]}
@@ -754,6 +806,14 @@ class Handler(BaseHTTPRequestHandler):
                         ct = str(r.get("content", "")).strip()
                         if not ct:
                             continue
+                        # Record he thong Email Routing / GSC da duoc
+                        # delete_all_records GIU LAI — khong tao lai
+                        # keo trung lap.
+                        probe = {"type": str(r.get("type", "A")),
+                                 "name": expand_name(d, r.get("name", "")),
+                                 "content": ct}
+                        if _is_email_routing_record(probe) or _is_gsc_record(probe):
+                            continue
                         cf.create_record(zone["id"], str(r.get("type", "A")).upper(),
                                          expand_name(d, r.get("name", "")),
                                          ct, bool(r.get("proxied", True)))
@@ -893,17 +953,9 @@ class Handler(BaseHTTPRequestHandler):
                         results.append({"domain": d, "ok": False, "error": err})
                         continue
                     try:
-                        deleted = cf.delete_all_records(zone["id"])
-                        added = 0
-                        for r in recs:
-                            cf.create_record(zone["id"], r["type"].upper(),
-                                             expand_name(d, r.get("name", "")),
-                                             str(r.get("content", "")).strip(),
-                                             bool(r.get("proxied", True)))
-                            added += 1
+                        detail, okb = _sync_records(d, recs, cf, zone)
                         st[d] = check_domain(d, cfg)
-                        results.append({"domain": d, "ok": True,
-                                        "detail": f"da xoa {deleted} record cu, them {added} record moi"})
+                        results.append({"domain": d, "ok": okb, "detail": detail})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
                 save_status(st)

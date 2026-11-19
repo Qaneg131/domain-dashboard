@@ -608,7 +608,7 @@ def main():
     assert len(cf.list_email_rules(z5["id"])) == 2
     print("  OK", flush=True)
 
-    print("TEST 21: setup khong co preset — van xoa record cu, log canh bao ro...", flush=True)
+    print("TEST 21: setup khong co preset — bao loi, KHONG xoa record cu...", flush=True)
     z6, _c = cf.get_or_create_zone("nopreset.com")
     cf.create_record(z6["id"], "A", "nopreset.com", "8.8.8.8", True)
     STATE["nc_ns"]["nopreset.com"] = [NS1, NS2]
@@ -617,8 +617,9 @@ def main():
     cfg7["default_preset"] = ""  # gia lap user chua chon preset mac dinh
     res10 = dash.setup_domain("nopreset.com", "", cfg7)
     assert res10["ok"] is False, res10
-    assert any(s["step"] == "Xoa record cu" and s["ok"] is False for s in res10["steps"]), res10["steps"]
-    assert cf.list_records(z6["id"]) == [], cf.list_records(z6["id"])
+    assert any(s["step"] == "Ap preset" and s["ok"] is False for s in res10["steps"]), res10["steps"]
+    assert len(cf.list_records(z6["id"])) == 1, cf.list_records(z6["id"])
+    print("  OK", flush=True)
     print("  OK", flush=True)
 
     print("TEST 22: _apply_email_preset tu xoa MX cu khi bat email (khong qua buoc records)...", flush=True)
@@ -707,6 +708,28 @@ def main():
     assert st27b["email"]["enabled"] is True, st27b["email"]
     assert st27b["email"]["dns_locked"] is True, st27b["email"]
     assert st27b["email"]["rules"] == 2, st27b["email"]
+    print("  OK", flush=True)
+
+    print("TEST 28: ap preset kieu gop — chi xoa record trung, giu lai record khac...", flush=True)
+    z12, _c = cf.get_or_create_zone("merge.com")
+    for t, nm, ct in [("A", "@", "1.2.3.4"), ("A", "www", "1.2.3.4"),
+                      ("TXT", "@", "custom-verification=abc"),
+                      ("CNAME", "blog", "example.com")]:
+        cf.create_record(z12["id"], t, nm, ct, False)
+    cf.enable_email_routing(z12["id"])  # +3 MX + SPF + DKIM = 9 record
+    assert len(cf.list_records(z12["id"])) == 9, len(cf.list_records(z12["id"]))
+    res28 = dash.apply_preset("merge.com", "web", cfg6)
+    assert res28["ok"], res28
+    recs28 = cf.list_records(z12["id"])
+    assert len(recs28) == 9, [(r["type"], r["name"], r["content"]) for r in recs28]
+    assert any(r["type"] == "A" and r["content"] == "1.11.11.11" for r in recs28)
+    assert not any(r["type"] == "A" and r["content"] == "1.2.3.4" for r in recs28)
+    assert any(r["type"] == "TXT" and r["content"] == "custom-verification=abc" for r in recs28)
+    assert any(r["type"] == "CNAME" and r["content"] == "example.com" for r in recs28)
+    # Ap lai lan 2: khong doi gi, khong xoa gi.
+    res28b = dash.apply_preset("merge.com", "web", cfg6)
+    assert res28b["ok"] and "da xoa 0 record trung" in res28b["steps"][0]["detail"], res28b
+    assert len(cf.list_records(z12["id"])) == 9
     print("  OK", flush=True)
 
     srv.shutdown()
