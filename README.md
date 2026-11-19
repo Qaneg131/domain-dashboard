@@ -63,10 +63,23 @@ NS sẽ báo "chưa cấu hình Namecheap API".
 - **Bảng tổng quan** — mỗi domain 1 dòng: DNS (NS đã trỏ đúng chưa, check
   bằng DNS thật), Record (có record không, có khớp preset không),
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
+- **Badge "Đang chọn: <preset>"** — ngay cạnh dropdown Preset record, đổi
+  theo lựa chọn để khỏi nhầm khi Setup (Setup / Áp record luôn dùng đúng
+  preset đang chọn ở dropdown, không dùng mặc định nữa).
 - **Áp preset kiểu gộp (merge)** — Setup / Áp record KHÔNG xóa hết record cũ
   nữa: record giống hệt preset thì giữ, record trùng tên/loại nhưng khác
   nội dung thì xóa cái cũ rồi thêm mới, record khác (không nằm trong
   preset) giữ nguyên. Setup mà chưa chọn preset thì báo lỗi, không xóa gì.
+- **1 domain chỉ có 1 cấu hình** — khi áp preset mới, các record còn sót
+  lại của preset cũ (cùng type+tên+content với 1 record của preset khác)
+  sẽ bị gỡ, để domain không bị chồng 2 cấu hình; record tự do (không thuộc
+  preset nào) và record hệ thống Email Routing / GSC thì giữ nguyên. Hai
+  preset không được trùng hệt nhau (lưu preset trùng sẽ báo lỗi).
+- **Domain đã dùng preset khác thì hỏi trước khi Setup** — bấm Setup mà
+  domain đang dùng preset khác với preset đang chọn thì hiện bảng hỏi:
+  "Set lại record theo '<preset đang chọn>'" / "Giữ nguyên record — chỉ
+  làm email + HTTPS" (bỏ qua bước record) / "Hủy". Domain chưa kiểm tra
+  hoặc đã khớp preset thì Setup chạy thẳng, không hỏi.
 - **Cột Record hiện tên preset, không khớp thì để trống** — check so
   record với **mọi preset đã thêm** (preset mặc định trước): domain nào
   khớp preset "Web Hân" thì cột hiện "✓ Web Hân", khớp "Web Long" thì
