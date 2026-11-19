@@ -217,7 +217,9 @@ NS sẽ báo "chưa cấu hình Namecheap API".
 - **Preset record** — lưu cấu hình record để áp nhanh, vd preset `web`:
   `A @ → 1.11.11.11`, `A www → 1.11.11.11`. Áp preset sẽ xóa hết record
   cũ rồi thêm mới (nhưng giữ lại record hệ thống của Email Routing:
-  3 MX + SPF + DKIM).
+  3 MX + SPF + DKIM). Dropdown chọn preset luôn hiện đúng record của
+  preset đang chọn (chọn "Web Anh Long" thì thấy record của Web Anh
+  Long, không bị nhảy về preset mặc định sau khi lưu).
 - **Email preset** — rule forward áp trong lúc Setup, mặc định 2 rule:
   `info@` và `*` (catch-all) → địa chỉ nhận bạn nhập. Địa chỉ nhận phải
   bấm link xác minh trong mail thì rule mới chạy. Catch-all là rule đặc

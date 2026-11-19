@@ -393,8 +393,12 @@ async function refresh() {
 function renderPresets() {
   const cfg = STATE.config || {};
   const sel = document.getElementById('presetSelect');
+  const cur = sel.value || '';
   const names = Object.keys(cfg.presets || {});
-  sel.innerHTML = names.map(n => `<option value="${esc(n)}" ${n === cfg.default_preset ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  sel.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  // Giu nguyen preset dang chon (dung reset ve mac dinh moi lan ve lai
+  // danh sach) — chi ve mac dinh khi preset dang chon khong con nua.
+  sel.value = names.includes(cur) ? cur : (cfg.default_preset || names[0] || '');
   document.getElementById('presetDefaultLabel').textContent = 'Mặc định: ' + (cfg.default_preset || '(chưa có)');
   loadPresetIntoEditor();
   renderRecFilter();
@@ -453,6 +457,7 @@ async function savePreset() {
   STATE.config.presets = res.presets;
   renderPresets();
   document.getElementById('presetSelect').value = name;
+  loadPresetIntoEditor();
   log(`Đã lưu preset "${name}".`);
 }
 function newPreset() {
