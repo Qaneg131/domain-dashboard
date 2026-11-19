@@ -645,6 +645,47 @@ def _save_check_result(st, d, new_st):
     return True
 
 
+def _check_dns_light(domains, cfg, st):
+    """Kiem tra NHANH chi cot DNS: lay danh sach zone CF 1 lan, DoH
+    tung domain, so NS cong voi NS zone -> ns_ok. Khong goi records /
+    email / HTTPS / cache, khong goi Namecheap — nhanh, khong dinh
+    gioi han toc do. Chi luu trang thai NHE (light: chi co DNS) khi
+    chua co trang thai day du hoac trang thai cu dang loi; trang thai
+    day du thi giu nguyen. Tra ve dict {domain: trang thai nhe}."""
+    if not cfg.get("cf_token"):
+        return {"__error__": "chua nhap Cloudflare API token (muc Cai dat)"}
+    cf = _cf_client(cfg)
+    zones = {}
+    for z in cf.list_zones():
+        zones[str(z.get("name", "")).lower()] = z
+    out = {}
+    for d in domains:
+        d = str(d).strip().lower()
+        if not d:
+            continue
+        old = st.get(d)
+        if old and not old.get("error") and not old.get("light"):
+            continue  # da co trang thai day du (co zone hay khong), giu nguyen
+        light = {"domain": d, "checked_at": time.strftime("%H:%M:%S %d/%m/%Y"),
+                 "zone": None, "doh_ns": [], "registrar_ns": [],
+                 "ns_ok": False, "records": [], "records_ok": None,
+                 "email": None, "https": None, "error": None, "light": True}
+        z = zones.get(d)
+        if z:
+            light["zone"] = {"id": z.get("id"), "status": z.get("status"),
+                             "name_servers": [x.lower() for x in z.get("name_servers", [])]}
+        try:
+            light["doh_ns"] = _doh(d)
+        except Exception as e:
+            light["error"] = f"DoH lookup loi: {e}"
+        if light["zone"] and light["doh_ns"]:
+            want = {x.lower() for x in light["zone"]["name_servers"]}
+            light["ns_ok"] = bool(want) and set(light["doh_ns"]) == want
+        st[d] = light
+        out[d] = light
+    return out
+
+
 def _check_many(domains, cfg, st):
     """Kiem tra nhieu domain: nghi 0.3s giua cac domain de bot dot
     API, DUNG NGAY khi gap gioi han toc do (429/throttling) de khong
@@ -802,6 +843,18 @@ class Handler(BaseHTTPRequestHandler):
                     _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"ok": True, "status": {d: st[d]}})
+            elif path == "/api/check-dns":
+                # Kiem tra NHANH chi cot DNS (zone + DoH) cho 1 loat domain
+                # — dung chung danh sach zone cua tai khoan nen khong can
+                # check day du tung domain. Nhanh, khong dinh 429.
+                wanted = [str(x).strip().lower() for x in (body.get("domains") or [])
+                          if str(x).strip()]
+                out = _check_dns_light(wanted, cfg, st)
+                if "__error__" in out:
+                    self._json({"ok": False, "error": out["__error__"]})
+                    return
+                save_status(st)
+                self._json({"ok": True, "status": out})
             elif path == "/api/setup":
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()

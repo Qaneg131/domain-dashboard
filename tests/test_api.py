@@ -874,6 +874,42 @@ def main():
         {"step": "Đổi NS ở Namecheap", "ok": True, "detail": "registrar da ghi: a, b"}]})
     print("  OK", flush=True)
 
+    print("TEST 36: _check_dns_light — chi check DNS, khong goi Namecheap...", flush=True)
+    z18, _c = cf.get_or_create_zone("lightdns.com")
+    STATE["nc_ns"]["lightdns.com"] = [NS1, NS2]  # DoH tra dung NS zone
+    STATE["nc_ns"]["lightdns2.com"] = ["dns1.registrar-servers.com",
+                                       "dns2.registrar-servers.com"]
+    z19, _c = cf.get_or_create_zone("lightdns2.com")
+    STATE["nc_calls"] = 0
+    st36 = {}
+    out36 = dash._check_dns_light(["lightdns.com", "lightdns2.com", "nozone-light.com"], cfg6, st36)
+    assert STATE["nc_calls"] == 0, STATE["nc_calls"]  # khong goi NC
+    assert out36["lightdns.com"]["light"] and out36["lightdns.com"]["ns_ok"], out36
+    assert out36["lightdns.com"]["zone"]["status"] == "active", out36
+    assert out36["lightdns2.com"]["light"] and not out36["lightdns2.com"]["ns_ok"], out36
+    assert out36["nozone-light.com"]["light"] and out36["nozone-light.com"]["zone"] is None, out36
+    # Khong ghi de trang thai day du (co zone).
+    full36 = {"domain": "lightdns.com", "zone": {"id": "z", "status": "active",
+              "name_servers": [NS1, NS2]}, "ns_ok": True, "records": [{"id": "r1"}],
+              "records_ok": True, "email": {"enabled": True}, "https": {"ok": True},
+              "error": None}
+    st36["lightdns.com"] = dict(full36)
+    dash._check_dns_light(["lightdns.com"], cfg6, st36)
+    assert st36["lightdns.com"] == full36, st36
+    # Khong ghi de trang thai day du (khong co zone).
+    st36["nozone-light.com"] = {"domain": "nozone-light.com", "zone": None,
+                                "ns_ok": False, "error": None}
+    dash._check_dns_light(["nozone-light.com"], cfg6, st36)
+    assert st36["nozone-light.com"] == {"domain": "nozone-light.com", "zone": None,
+                                        "ns_ok": False, "error": None}, st36
+    # Trang thai loi thi duoc thay bang trang thai nhe.
+    st36["lightdns.com"] = {"domain": "lightdns.com", "zone": None,
+                            "error": "Too many requests"}
+    dash._check_dns_light(["lightdns.com"], cfg6, st36)
+    assert st36["lightdns.com"]["light"] and st36["lightdns.com"]["ns_ok"] \
+        and not st36["lightdns.com"]["error"], st36
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

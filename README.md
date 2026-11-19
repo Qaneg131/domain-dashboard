@@ -125,6 +125,17 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   lỗi này để các domain sau không lỗi theo — đợi ~2 phút rồi chạy
   lại chỉ những domain chưa xong. Mẹo: đừng chạy Kiểm tra tất cả +
   Setup cùng lúc.
+- **Kiểm tra nhanh DNS** — nút này dùng chung danh sách zone của tài
+  khoản (giống bên tab mail) + DNS công (DoH) để biết ngay domain nào
+  NS đã set, **không cần check đầy đủ từng domain**: không gọi
+  records/email/HTTPS/cache, không gọi Namecheap nên rất nhanh và
+  không dính 429. Domain nào NS đã set thì cột DNS xanh ngay; các
+  cột khác vẫn hiện "chưa kiểm tra" cho đến khi chạy "Kiểm tra tất
+  cả" (trạng thái này chỉ có DNS, ghi rõ "chỉ DNS" dưới tên domain).
+  Trạng thái đầy đủ đã có thì không bị ghi đè, domain đang lỗi thì
+  được thay bằng trạng thái nhẹ (hết lỗi ở cột DNS). Domain đang lỗi
+  mà zone đã có trong tài khoản thì bảng vẫn hiện zone (active + NS)
+  bên dưới dòng lỗi để thấy zone đã xanh.
 - **Cửa sổ thông báo sau khi lệnh xong** — mỗi lệnh chạy xong (Setup,
   Setup danh sách, Áp record, Áp HTTPS, Bypass cache, Xóa zone,
   Kiểm tra, Setup email, Thêm domain) đều hiện cửa sổ thông báo tóm

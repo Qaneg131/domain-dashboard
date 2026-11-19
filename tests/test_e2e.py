@@ -224,6 +224,20 @@ def main():
     assert by_d["batch1.com"].get("already_set") is True, by_d
     assert by_d["nozone-x.com"]["ok"] is False, by_d
     print("SETUP-EMAIL-BATCH OK: da set thi bo qua, khong zone thi bao loi", flush=True)
+
+    # Kiem tra nhanh DNS: chi check zone + DoH, khong goi Namecheap.
+    STATE["zones"]["lightcheck.com"] = {"id": "z-light", "name": "lightcheck.com",
+                                        "status": "active",
+                                        "name_servers": [NS1, NS2]}
+    STATE["nc_ns"]["lightcheck.com"] = [NS1, NS2]
+    ld = call("POST", "/api/check-dns", {"domains": ["lightcheck.com", "batch1.com"]})
+    assert ld["ok"], ld
+    assert ld["status"]["lightcheck.com"]["light"] and ld["status"]["lightcheck.com"]["ns_ok"], ld
+    # batch1.com da co trang thai day du (tu buoc AUTO-MERGE) -> khong bi ghi de.
+    assert "lightcheck.com" in ld["status"] and "batch1.com" not in ld["status"], ld
+    st3 = call("GET", "/api/state")
+    assert st3["status"]["lightcheck.com"]["light"], st3["status"]
+    print("CHECK-DNS NHANH OK: chi DNS, khong goi Namecheap, khong ghi de trang thai day du", flush=True)
     mock.shutdown()
     print("E2E OK")
 

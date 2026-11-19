@@ -156,6 +156,7 @@
       <span class="muted" id="domainCount"></span>
       <span class="muted" id="errorCount" style="color:#c0392b"></span>
       <button class="secondary small" id="recheckErrorsBtn" style="display:none" onclick="recheckErrors()">Kiểm tra lại domain bị lỗi</button>
+      <button class="secondary" onclick="checkDnsFast()">Kiểm tra nhanh DNS</button>
     </div>
     <div class="row" id="bulkBar">
       <span class="muted" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
@@ -635,7 +636,7 @@ function renderEmailTab() {
       if (state !== fRouting) return false;
     }
     if (fLock) {
-      const state = !hasStatus || !s.zone ? 'unknown' : s.email && s.email.dns_locked ? 'locked' : 'unlocked';
+      const state = !hasStatus || !s.zone || s.light ? 'unknown' : s.email && s.email.dns_locked ? 'locked' : 'unlocked';
       if (state !== fLock) return false;
     }
     return true;
@@ -666,11 +667,11 @@ function renderEmailTab() {
     const dnsCell = dnsBadge + (nsLines.length
       ? `<br><span class="mono">${nsLines.map(esc).join('<br>')}</span>` : '')
       + `<br><span class="muted">zone: ${z.status || 'chưa rõ'}</span>`;
-    const routing = !s.zone ? '<span class="muted">chưa kiểm tra</span>'
+    const routing = !s.zone || s.light ? '<span class="muted">chưa kiểm tra</span>'
       : em.error ? '<span class="badge no">No</span><br><span class="muted">lỗi</span>'
       : em.enabled ? `<span class="badge ok">● Enabled</span><br><span class="muted">${em.rules || 0} rule</span>`
       : '<span class="badge no">Disabled</span>';
-    const dnsLock = !s.zone ? '<span class="muted">—</span>'
+    const dnsLock = !s.zone || s.light ? '<span class="muted">chưa kiểm tra</span>'
       : em.dns_locked ? '<span class="badge ok">● Locked</span>' : '<span class="muted">Unlocked</span>';
     const btn = active
       ? `<button class="small" onclick="setupEmailOne('${esc(d)}')">Setup email</button>`
@@ -869,30 +870,34 @@ function managedRow(d) {
     // (zone active/pending + NS) — lay 1 lan cho het zone nen thay ngay.
     const zi = zone ? null : (ACCOUNT_ZONES || []).find(z => z.name === d);
     let dnsCell;
-    if (s.error && !zone) dnsCell = `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`;
+    if (s.error && !zone) dnsCell = `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>` + (zi ? `<br><span class="badge ${zi.status === 'active' ? 'ok' : 'wait'}">${esc(zi.status)}</span><br><span class="mono">${(zi.name_servers || []).map(esc).join('<br>')}</span><br><span class="muted">zone có sẵn (theo danh sách tài khoản)</span>` : '');
     else if (zone) dnsCell = yesNo(s.ns_ok) + `<br><span class="mono">${(s.doh_ns || []).map(esc).join('<br>') || ''}</span>`
         + `<br><span class="muted">zone: ${esc(zone.status)}</span>`;
     else if (zi) dnsCell = `<span class="badge ${zi.status === 'active' ? 'ok' : 'wait'}">${esc(zi.status)}</span><br><span class="mono">${(zi.name_servers || []).map(esc).join('<br>')}</span><br><span class="muted">chưa kiểm tra chi tiết</span>`;
     else dnsCell = '<span class="muted">—</span>';
     const recs = s.records || [];
     const recCell = !zone ? '<span class="muted">—</span>'
+      : s.light ? '<span class="muted">chưa kiểm tra</span>'
       : recs.length === 0 ? '<span class="badge no">No</span><br><span class="muted">0 record</span>'
       : yesNo(true) + `<br><span class="muted">${recs.length} record${s.records_ok ? ' ✓ khớp preset' : ''}</span>`;
     const em = s.email;
     const emCell = !zone ? '<span class="muted">—</span>'
+      : s.light ? '<span class="muted">chưa kiểm tra</span>'
       : em && em.error ? `<span class="badge no">No</span><br><span class="muted">cần quyền token</span>`
       : yesNo(em && em.enabled) + (em && em.enabled ? `<br><span class="muted">${em.rules || 0} rule</span>` : '');
     const ht = s.https;
     const htCell = !zone ? '<span class="muted">—</span>'
+      : s.light ? '<span class="muted">chưa kiểm tra</span>'
       : ht && ht.error ? `<span class="badge no">No</span><br><span class="muted">cần quyền token</span>`
       : yesNo(ht && ht.ok) + (ht && ht.ssl ? `<br><span class="muted">${esc(ht.ssl)}${ht.min_tls ? ' · TLS ' + esc(ht.min_tls) : ''}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
     const cacheCell = !zone ? '<span class="muted">—</span>'
+      : s.light ? '<span class="muted">chưa kiểm tra</span>'
       : s.cache_bypass === true ? '<span class="badge ok">By Pass</span>'
       : s.cache_bypass === false ? '<span class="badge no">No</span>'
       : '<span class="muted">cần quyền token</span>';
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${esc(d)}" onchange="updateSelectedCount()"></td>
-      <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}</span></td>
+      <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}${s.light ? ' · chỉ DNS' : ''}</span></td>
       <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td><td>${cacheCell}</td>
       <td style="white-space:nowrap">
         <button class="small secondary" onclick="openEdit('${esc(d)}')">Edit</button>
@@ -1327,12 +1332,16 @@ function stopBatchCheck() {
   log('Đã bấm dừng — sẽ dừng sau loat hiện tại.');
 }
 function isErrorStatus(s) { return !!(s && s.error); }
+// Trang thai DAY DU = da check day du 1 lan (co zone hay khong, mien la
+// khong loi va khong phai trang thai nhe chi co DNS).
+function isFullStatus(s) { return !!(s && !s.error && !s.light); }
 function errorDomains() {
   return (STATE.config.domains || []).filter(d => isErrorStatus(STATE.status[d]));
 }
 function todoDomains() {
-  // Domain chua co trang thai HOAC trang thai dang loi — deu can kiem tra.
-  return (STATE.config.domains || []).filter(d => !STATE.status[d] || isErrorStatus(STATE.status[d]));
+  // Domain chua co trang thai day du (chua kiem tra / dang loi / chi co
+  // trang thai nhe DNS) — deu can kiem tra day du.
+  return (STATE.config.domains || []).filter(d => !isFullStatus(STATE.status[d]));
 }
 function renderErrorCount() {
   const errs = errorDomains();
@@ -1350,7 +1359,7 @@ async function runBatchCheck(list, label) {
   BATCH_CHECK = { running: true, list, index: 0, stopped: false };
   document.getElementById('batchStopBtn').style.display = '';
   const all = STATE.config.domains || [];
-  const startGood = all.filter(d => STATE.status[d] && !isErrorStatus(STATE.status[d])).length;
+  const startGood = all.filter(d => isFullStatus(STATE.status[d])).length;
   log(`${label} — ${list.length} domain (đã có ${startGood}/${all.length} tốt)…`);
   while (BATCH_CHECK.index < BATCH_CHECK.list.length) {
     if (BATCH_CHECK.stopped) break;
@@ -1420,6 +1429,51 @@ async function recheckErrors() {
       : 'Hết domain bị lỗi — tất cả đã kiểm tra xong.');
   } else {
     setBatchProgress(`Đã dừng ở ${r.checked}/${r.total} — bấm lại để tiếp tục.`);
+  }
+}
+async function checkDnsFast() {
+  // Kiem tra NHANH chi cot DNS: dung chung danh sach zone cua tai khoan
+  // (giong ben tab mail) + DoH — biet ngay domain nao NS da set, khong
+  // can check day du tung domain (khong goi records/email/https/cache,
+  // khong goi Namecheap) nen rat nhanh va khong dinh 429. Domain nao
+  // NS da set thi cot DNS xanh ngay; cac cot khac van "chua kiem tra"
+  // cho den khi chay "Kiem tra tat ca".
+  const all = STATE.config.domains || [];
+  const todo = all.filter(d => !isFullStatus(STATE.status[d]));
+  if (!all.length) { log('Chưa có domain nào.'); return; }
+  if (!todo.length) {
+    log('Đã kiểm tra DNS xong hết rồi (tất cả đã có trạng thái đầy đủ).');
+    notify('Kiểm tra nhanh DNS xong', 'Tất cả domain đã có trạng thái đầy đủ.');
+    return;
+  }
+  if (BATCH_CHECK.running) { log('Đang kiểm tra theo loat — đợi chạy xong hoặc bấm Dừng.'); return; }
+  BATCH_CHECK = { running: true, list: todo, index: 0, stopped: false };
+  document.getElementById('batchStopBtn').style.display = '';
+  log(`Kiểm tra nhanh DNS cho ${todo.length} domain (chỉ check zone + NS công, không gọi Namecheap)…`);
+  while (BATCH_CHECK.index < BATCH_CHECK.list.length) {
+    if (BATCH_CHECK.stopped) break;
+    const batch = BATCH_CHECK.list.slice(BATCH_CHECK.index, BATCH_CHECK.index + BATCH_SIZE);
+    setBatchProgress(`Đang kiểm tra nhanh DNS ${BATCH_CHECK.index + 1}–${BATCH_CHECK.index + batch.length}/${BATCH_CHECK.list.length}…`);
+    const res = await api('/api/check-dns', { domains: batch });
+    if (res.error) { log('Kiểm tra nhanh DNS lỗi: ' + res.error); break; }
+    STATE.status = { ...STATE.status, ...res.status };
+    BATCH_CHECK.index += batch.length;
+    renderTable();
+    renderEmailTab();
+    if (BATCH_CHECK.index < BATCH_CHECK.list.length)
+      await new Promise(r => setTimeout(r, 1000));
+  }
+  const finished = BATCH_CHECK.index >= BATCH_CHECK.list.length;
+  BATCH_CHECK.running = false;
+  document.getElementById('batchStopBtn').style.display = 'none';
+  const good = all.filter(d => { const st = STATE.status[d]; return st && st.ns_ok && !st.error; }).length;
+  const errs = errorDomains().length;
+  if (finished) {
+    setBatchProgress(`Đã kiểm tra nhanh DNS xong ${todo.length} domain.`);
+    log(`Đã kiểm tra nhanh DNS xong ${todo.length} domain — ${good}/${all.length} domain NS đã set ✓.${errs ? ` Còn ${errs} domain bị lỗi.` : ''}`);
+    notify('Kiểm tra nhanh DNS xong', `Đã kiểm tra nhanh DNS xong <b>${todo.length}</b> domain — <b>${good}/${all.length}</b> domain NS đã set ✓.` + (errs ? `<br>Còn <b>${errs}</b> domain bị lỗi: ${namesHtml(errorDomains())}` : ''));
+  } else {
+    setBatchProgress(`Đã dừng ở ${BATCH_CHECK.index}/${todo.length} — bấm lại để tiếp tục.`);
   }
 }
 async function setupOne(d) {
