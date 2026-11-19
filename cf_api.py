@@ -131,11 +131,16 @@ class CFClient:
         """Xoa het record cu. Tra ve so record da xoa.
         Mac dinh GIU LAI record he thong cua Email Routing (3 MX
         route*.mx.cloudflare.net + SPF + DKIM) de ap preset khong lam
-        hong email — cac record nay do chuc nang Email Routing quan ly."""
+        hong email — cac record nay do chuc nang Email Routing quan ly.
+        Cung GIU LAI record TXT xac minh Google Search Console (set tay)
+        de Setup/ap preset khong lam mat xac minh."""
         recs = self.list_records(zone_id)
         kept = 0
         for r in recs:
             if preserve_email and _is_email_routing_record(r):
+                kept += 1
+                continue
+            if _is_gsc_record(r):
                 kept += 1
                 continue
             self.delete_record(zone_id, r["id"])
@@ -357,3 +362,12 @@ def _is_email_routing_record(r):
     if t == "TXT" and name.startswith("cf2024-1._domainkey"):
         return True
     return False
+
+
+def _is_gsc_record(r):
+    """Record TXT xac minh Google Search Console — set tay, giu lai khi
+    xoa record cu (giong record he thong Email Routing)."""
+    if (r.get("type") or "").upper() != "TXT":
+        return False
+    return str(r.get("content") or "").strip().strip('"').startswith(
+        "google-site-verification=")

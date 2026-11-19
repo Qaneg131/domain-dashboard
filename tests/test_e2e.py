@@ -156,6 +156,23 @@ def main():
     det5 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
     assert len(det5["email_detail"]["rules"]) == 2, det5["email_detail"]
     print("EMAIL-RULE CATCH-ALL OK: khong tao trung rule", flush=True)
+
+    # Google Search Console: them TXT @ bang ma nhap tay.
+    gsc = call("POST", "/api/gsc", {"domain": "batch1.com", "value": "gsc-test-123"})
+    assert gsc["ok"] and gsc["detail"] == "da them", gsc
+    gsc2 = call("POST", "/api/gsc", {"domain": "batch1.com",
+                                     "value": "google-site-verification=gsc-test-123"})
+    assert gsc2["ok"] and gsc2["detail"] == "da co san", gsc2
+    det6 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    assert det6["gsc"] == "google-site-verification=gsc-test-123", det6.get("gsc")
+    print("GSC OK: them TXT @, trung thi giu, domain-detail hien dung", flush=True)
+
+    # Tab Setup email: chi chay buoc email (da co san thi giu nguyen).
+    se = call("POST", "/api/setup-email", {"domain": "batch1.com"})
+    assert se["ok"], se
+    assert any(s["step"].startswith("Rule info@batch1.com") and s["detail"] == "da co san"
+               for s in se["steps"]), se["steps"]
+    print("SETUP-EMAIL OK: chi chay buoc email, rule cu giu nguyen", flush=True)
     mock.shutdown()
     print("E2E OK")
 

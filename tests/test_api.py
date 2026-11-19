@@ -671,6 +671,31 @@ def main():
     dash.EMAIL_POLL_S = 30
     print("  OK", flush=True)
 
+    print("TEST 26: GSC — them TXT @, trung thi giu, khac thi thay, Setup giu lai...", flush=True)
+    z10, _c = cf.get_or_create_zone("gsctest.com")
+    ok26, dt26 = dash.set_gsc_record("gsctest.com", "abc123", cfg6)
+    assert ok26 and dt26 == "da them", (ok26, dt26)
+    g = [r for r in cf.list_records(z10["id"])
+         if r["type"] == "TXT" and "google-site-verification" in r["content"]]
+    assert len(g) == 1 and g[0]["content"] == "google-site-verification=abc123", g
+    assert g[0]["proxied"] is False, g
+    assert dash._gsc_from_records(cf.list_records(z10["id"])) == "google-site-verification=abc123"
+    ok26b, dt26b = dash.set_gsc_record(
+        "gsctest.com", "google-site-verification=abc123", cfg6)
+    assert ok26b and dt26b == "da co san", (ok26b, dt26b)
+    ok26c, dt26c = dash.set_gsc_record("gsctest.com", "xyz999", cfg6)
+    assert ok26c and dt26c == "da cap nhat", (ok26c, dt26c)
+    g2 = [r for r in cf.list_records(z10["id"])
+          if r["type"] == "TXT" and "google-site-verification" in r["content"]]
+    assert len(g2) == 1 and g2[0]["content"] == "google-site-verification=xyz999", g2
+    # Setup (ap preset) xoa record cu nhung GIU record GSC.
+    res26 = dash.setup_domain("gsctest.com", "web", cfg6)
+    assert res26["ok"], res26
+    g3 = [r for r in cf.list_records(z10["id"])
+          if r["type"] == "TXT" and "google-site-verification" in r["content"]]
+    assert len(g3) == 1 and g3[0]["content"] == "google-site-verification=xyz999", g3
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

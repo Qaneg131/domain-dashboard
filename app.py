@@ -26,7 +26,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from cf_api import CFClient, CFError, expand_name
+from cf_api import CFClient, CFError, _is_gsc_record, expand_name
 from dns_check import doh_ns, my_ip
 from nc_api import NCClient, NCError
 from store import load_config, save_config, load_status, save_status, BASE_DIR
@@ -228,6 +228,50 @@ def _wait_zone_active(domain, cf, zone):
         if cur.get("status") == "active":
             return True, waited
     return False, waited
+
+
+# ------------------------------------------------- Google Search Console
+def _normalize_gsc_value(value):
+    """Chuan hoa ma xac minh GSC: cat khoang trang/ngoac kep; neu user chi
+    dan phan ma (khong co tien to) thi them 'google-site-verification='."""
+    v = str(value or "").strip().strip('"').strip()
+    if not v:
+        return ""
+    if v.lower().startswith("google-site-verification="):
+        return "google-site-verification=" + v.split("=", 1)[1].strip()
+    return "google-site-verification=" + v
+
+
+def _gsc_from_records(records):
+    """Record TXT xac minh GSC hien co (@) hoac None."""
+    for r in records or []:
+        if _is_gsc_record(r):
+            return str(r.get("content", "")).strip().strip('"')
+    return None
+
+
+def set_gsc_record(domain, value, cfg):
+    """Them/cap nhat record TXT @ xac minh Google Search Console.
+    Gia tri nhap tay (lay tu Search Console) — tool khong tu lay duoc.
+    Cung gia tri thi giu nguyen, khac thi xoa cu them moi. Tra ve
+    (ok, detail)."""
+    v = _normalize_gsc_value(value)
+    if not v:
+        return False, "chua nhap ma xac minh (google-site-verification=...)"
+    cf, zone, err = _get_zone_or_error(domain, cfg)
+    if err:
+        return False, err
+    try:
+        cur = [r for r in cf.list_records(zone["id"]) if _is_gsc_record(r)]
+        if any(str(r.get("content", "")).strip().strip('"') == v for r in cur):
+            return True, "da co san"
+        for r in cur:
+            cf.delete_record(zone["id"], r["id"])
+        # TXT bat buoc DNS-only; create_record tu set proxied=False.
+        cf.create_record(zone["id"], "TXT", domain, v, proxied=False)
+        return True, "da cap nhat" if cur else "da them"
+    except Exception as e:
+        return False, str(e)
 
 
 def _apply_email_preset(domain, cfg, cf, zone):
@@ -634,6 +678,7 @@ class Handler(BaseHTTPRequestHandler):
                 det = check_domain(d, cfg)
                 det["presets"] = cfg.get("presets", {})
                 det["default_preset"] = cfg.get("default_preset", "")
+                det["gsc"] = _gsc_from_records(det.get("records"))
                 if det.get("zone"):
                     try:
                         cf = _cf_client(cfg)
@@ -649,6 +694,29 @@ class Handler(BaseHTTPRequestHandler):
                                                "rules": [], "addresses": [],
                                                "error": str(e)}
                 self._json(det)
+            elif path == "/api/gsc":
+                # Them/cap nhat record TXT @ xac minh Google Search Console.
+                # Ma xac minh nhap tay (lay tu Search Console).
+                d = str(body.get("domain", "")).strip().lower()
+                ok, detail = set_gsc_record(d, body.get("value", ""), cfg)
+                st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json({"domain": d, "ok": ok, "detail": detail})
+            elif path == "/api/setup-email":
+                # Chi chay buoc Email Routing (bat routing + ap rule theo
+                # email preset) — dung cho tab 'Setup email' (chi domain
+                # zone active). Zone chua active thi _apply_email_preset
+                # tu doi toi da 5 phut roi bao ro.
+                d = str(body.get("domain", "")).strip().lower()
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "steps": [
+                        {"step": "Tim zone", "ok": False, "detail": err}]})
+                    return
+                steps, ok = _apply_email_preset(d, cfg, cf, zone)
+                st[d] = check_domain(d, cfg)
+                save_status(st)
+                self._json({"domain": d, "ok": ok, "steps": steps})
             elif path == "/api/sync-ns":
                 d = str(body.get("domain", "")).strip().lower()
                 cf, zone, err = _get_zone_or_error(d, cfg)

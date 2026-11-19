@@ -143,6 +143,7 @@
     <div class="row">
       <button id="tabManaged" onclick="showDomainTab('managed')">Danh sách quản lý</button>
       <button class="secondary" id="tabAccount" onclick="showDomainTab('account')">Tất cả trong tài khoản</button>
+      <button class="secondary" id="tabEmail" onclick="showDomainTab('email')">Setup email</button>
     </div>
     <div id="managedTab">
     <div class="row">
@@ -182,6 +183,18 @@
         <tbody id="accountTable"><tr><td colspan="4" class="muted">Bấm "Tải lại danh sách" để xem hết domain trong tài khoản Cloudflare.</td></tr></tbody>
       </table>
       <p class="hint">Tab này chỉ liệt kê — bấm "Thêm" để đưa domain vào bảng quản lý rồi mới Setup. Sửa tay: đổi tên/IP preset ở mục Preset record / Email preset, hoặc bấm Edit ở bảng quản lý.</p>
+    </div>
+    <div id="emailTab" style="display:none">
+      <div class="row">
+        <button class="secondary" onclick="checkAll()">Kiểm tra trạng thái</button>
+        <button onclick="setupEmailAllActive()">Setup email tất cả (active)</button>
+        <span class="muted" id="emailTabCount"></span>
+      </div>
+      <p class="hint">Chỉ hiện domain có zone đã <b>active</b> — zone pending thì Cloudflare không cho bật Email Routing. Bấm "Setup email" để bật Email Routing + áp rule theo email preset.</p>
+      <table>
+        <thead><tr><th>Name</th><th>Zone</th><th>Email routing</th><th></th></tr></thead>
+        <tbody id="emailTable"><tr><td colspan="4" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr></tbody>
+      </table>
     </div>
   </div>
 
@@ -260,6 +273,15 @@
       <button onclick="saveHttps()">Lưu HTTPS</button>
     </div>
     <p class="hint">Khuyên dùng: Flexible (origin chưa có chứng chỉ hợp lệ) + Always Use HTTPS bật + Minimum TLS 1.2.</p>
+
+    <h3>Google Search Console</h3>
+    <p class="hint">Xác minh domain với Google Search Console bằng record TXT @. Mã xác minh phải lấy tay từ Search Console (tool không tự lấy được) rồi dán vào đây. Record này được giữ lại khi áp preset / Setup.</p>
+    <div class="row">
+      <input type="text" id="editGscValue" placeholder="google-site-verification=...">
+      <button class="secondary small" onclick="saveGsc()">Thêm record TXT</button>
+      <span class="muted" id="editGscMsg"></span>
+    </div>
+    <div class="muted" id="editGscCurrent"></div>
   </div>
 </div>
 <script>
@@ -333,6 +355,7 @@ async function refresh() {
   renderEmailPreset();
   renderHttpsPreset();
   renderTable();
+  renderEmailTab();
 }
 
 function renderPresets() {
@@ -498,9 +521,68 @@ let ACCOUNT_ZONES = [];
 function showDomainTab(which) {
   document.getElementById('managedTab').style.display = which === 'managed' ? '' : 'none';
   document.getElementById('accountTab').style.display = which === 'account' ? '' : 'none';
+  document.getElementById('emailTab').style.display = which === 'email' ? '' : 'none';
   document.getElementById('tabManaged').className = which === 'managed' ? '' : 'secondary';
   document.getElementById('tabAccount').className = which === 'account' ? '' : 'secondary';
+  document.getElementById('tabEmail').className = which === 'email' ? '' : 'secondary';
   if (which === 'account' && !ACCOUNT_ZONES.length) loadAccountZones();
+  if (which === 'email') {
+    renderEmailTab();
+    // Chua co trang thai thi tu kiem tra luon de biet domain nao active.
+    if (!(STATE.status && Object.keys(STATE.status).length)) checkAll();
+  }
+}
+// ---------------------------------------------------------------- tab Setup email
+// Chi hien domain co zone active — zone pending thi Cloudflare khong cho
+// bat Email Routing nen khong cho set o day.
+function renderEmailTab() {
+  const tb = document.getElementById('emailTable');
+  const domains = STATE.config.domains || [];
+  const checked = domains.filter(d => STATE.status && STATE.status[d]);
+  const active = checked.filter(d => STATE.status[d].zone && STATE.status[d].zone.status === 'active');
+  const pending = checked.length - active.length;
+  document.getElementById('emailTabCount').textContent =
+    `${active.length} domain active / ${domains.length} domain quản lý` +
+    (pending ? ` (${pending} domain chưa active nên không hiện ở đây)` : '');
+  if (!checked.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr>';
+    return;
+  }
+  if (!active.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="muted">Chưa có domain nào active — đợi Cloudflare kích hoạt zone rồi bấm "Kiểm tra trạng thái" lại.</td></tr>';
+    return;
+  }
+  tb.innerHTML = active.map(d => {
+    const s = STATE.status[d];
+    const em = s.email || {};
+    const emTxt = em.error ? `<span class="badge no">No</span> <span class="muted">lỗi: ${esc(em.error)}</span>`
+      : em.enabled ? `<span class="badge ok">Yes</span> ${em.rules || 0} rule`
+      : '<span class="badge no">No</span>';
+    return `<tr><td><b>${esc(d)}</b></td>
+      <td><span class="badge ok">active</span></td>
+      <td>${emTxt}</td>
+      <td><button class="small" onclick="setupEmailOne('${esc(d)}')">Setup email</button></td></tr>`;
+  }).join('');
+}
+async function setupEmailOne(d) {
+  if (!confirm(`Setup email cho ${d}?\n- Bật Email Routing (nếu chưa)\n- Áp rule theo email preset`)) return;
+  log(`Đang setup email cho ${d}…`);
+  const res = await api('/api/setup-email', { domain: d });
+  log(fmtSteps(res));
+  showDiagnosis([res]);
+  await refresh();
+}
+async function setupEmailAllActive() {
+  const domains = (STATE.config.domains || []).filter(d =>
+    STATE.status[d] && STATE.status[d].zone && STATE.status[d].zone.status === 'active');
+  if (!domains.length) { alert('Chưa có domain nào active.'); return; }
+  if (!confirm(`Setup email cho ${domains.length} domain active?`)) return;
+  log(`Đang setup email cho ${domains.length} domain…`);
+  const results = [];
+  for (const d of domains) results.push(await api('/api/setup-email', { domain: d }));
+  log(results.map(fmtSteps).join('\n\n'));
+  showDiagnosis(results);
+  await refresh();
 }
 async function loadAccountZones() {
   const res = await api('/api/account-zones');
@@ -526,6 +608,10 @@ async function addZoneToManaged(d) {
   await api('/api/domains', { domain: d });
   await refresh();
   renderAccountZones();
+  // Tu dong kiem tra trang thai ngay — khoi phai bam "Kiem tra tat ca".
+  const res = await api('/api/check', { domain: d });
+  STATE.status = { ...STATE.status, ...res.status };
+  renderTable();
 }
 async function saveSettings() {
   const body = {
@@ -730,6 +816,11 @@ async function openEdit(d) {
   document.getElementById('editMinTls').value = ht.min_tls || '1.2';
   document.getElementById('editAlwaysHttps').checked = ht.always_https === 'on';
   document.getElementById('editRewrites').checked = ht.rewrites === 'on';
+  // Google Search Console.
+  document.getElementById('editGscValue').value = det.gsc || '';
+  document.getElementById('editGscCurrent').textContent =
+    det.gsc ? 'Đang có: ' + det.gsc : 'Chưa có record xác minh.';
+  document.getElementById('editGscMsg').textContent = '';
 }
 function closeEdit() { document.getElementById('editModal').classList.remove('open'); }
 async function reloadEdit() { if (EDIT_DOMAIN) await openEdit(EDIT_DOMAIN); await refresh(); }
@@ -803,6 +894,18 @@ async function saveHttps() {
   log(res.ok ? `Đã lưu HTTPS cho ${EDIT_DOMAIN}.` : ('Lỗi: ' + (res.error || '')));
   await reloadEdit();
 }
+async function saveGsc() {
+  const v = document.getElementById('editGscValue').value.trim();
+  if (!v) { document.getElementById('editGscMsg').textContent = 'Chưa nhập mã xác minh.'; return; }
+  const res = await api('/api/gsc', { domain: EDIT_DOMAIN, value: v });
+  document.getElementById('editGscMsg').textContent = res.ok ? res.detail : ('Lỗi: ' + (res.detail || ''));
+  if (res.ok) {
+    const shown = v.toLowerCase().startsWith('google-site-verification=')
+      ? v : 'google-site-verification=' + v;
+    document.getElementById('editGscCurrent').textContent = 'Đang có: ' + shown;
+    await refresh();
+  }
+}
 
 async function addDomain() {
   const d = document.getElementById('newDomain').value.trim().toLowerCase();
@@ -840,6 +943,7 @@ async function checkAll() {
   const res = await api('/api/check', { all: true });
   STATE.status = res.status || {};
   renderTable();
+  renderEmailTab();
   log(Object.values(STATE.status).map(s =>
     `${s.domain}: NS ${s.ns_ok ? 'ĐÃ SET ✓' : 'chưa set'} | zone: ${s.zone ? s.zone.status : 'chưa có'} | records: ${(s.records || []).length}${s.error ? ' | lỗi: ' + s.error : ''}`).join('\n'));
 }

@@ -63,7 +63,17 @@ NS sẽ báo "chưa cấu hình Namecheap API".
 - **Bảng tổng quan** — mỗi domain 1 dòng: DNS (NS đã trỏ đúng chưa, check
   bằng DNS thật), Record (có record không, có khớp preset không),
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
-- **Setup** — 1 click: tạo/lấy zone Cloudflare → đổi NS ở Namecheap (API)
+- **Tab "Setup email"** — chỉ hiện domain có zone đã **active** (zone pending
+  thì Cloudflare không cho bật Email Routing nên không cho set ở đây). Mỗi
+  dòng có nút "Setup email" (chỉ chạy bước Email Routing: bật routing +
+  áp rule theo email preset) và nút "Setup email tất cả (active)".
+- **Google Search Console** — mục riêng trong popup Edit: dán mã xác minh
+  lấy tay từ Search Console, bấm "Thêm record TXT" để thêm record TXT @
+  `google-site-verification=...` (nhập tay, tool không tự lấy được; dán
+  cả mã đầy đủ hoặc chỉ phần mã đều được). Record này được giữ lại khi
+  áp preset / Setup, không bị xóa cùng record cũ.
+- **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
+  tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo
   rule theo email preset → set HTTPS theo https preset (mặc định: SSL
   Flexible + Always Use HTTPS bật + Minimum TLS 1.2 + Auto HTTPS Rewrites
