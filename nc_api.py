@@ -9,6 +9,7 @@ Can bat API access trong tai khoan Namecheap (Profile -> Tools) va
 WHITELIST IP may chay tool (ClientIp). IP doi (mang dong) thi phai
 whitelist lai — xem nut 'Lay IP hien tai' o giao dien.
 """
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -59,10 +60,28 @@ class NCClient:
             root = ET.fromstring(raw)
         except ET.ParseError:
             raise NCError("Namecheap tra ve XML khong doc duoc")
+        # Namecheap tra XML co xmlns mac dinh
+        # (http://api.namecheap.com/xml.response) — khong boc namespace
+        # thi findall('.//Error'), findall('.//Nameserver'),
+        # find('.//DomainDNSSetCustomResult') deu tra ve rong, nen moi
+        # loi that bi nuot va setCustom luon bao sai du da doi duoc.
+        for el in root.iter():
+            if "}" in el.tag:
+                el.tag = el.tag.split("}", 1)[1]
         if root.get("Status") != "OK":
             errs = [e.text for e in root.findall(".//Error") if e.text]
             if errs:
-                raise NCError("; ".join(errs))
+                msg = "; ".join(errs)
+                # Loi 1011150: IP may chay tool chua duoc whitelist.
+                m = re.search(r"Invalid request IP: ([\d.]+)", msg)
+                if m:
+                    ip = m.group(1)
+                    raise NCError(
+                        f"Namecheap tu choi: IP {ip} chua duoc whitelist "
+                        f"(loi 1011150) — them IP nay vao Namecheap Profile > "
+                        f"Tools > API Access > Whitelisted IPs, va sua o Client IP "
+                        f"trong Cai dat thanh {ip} (hoac bam 'Lay IP hien tai')")
+                raise NCError(msg)
             # Khong co <Error> doc duoc — kem raw XML de doan nguyen nhan
             # (vd domain khong co trong tai khoan, IP chua whitelist...).
             raw_txt = " ".join(raw.decode("utf-8", errors="replace").split())

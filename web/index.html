@@ -39,6 +39,9 @@
   .preset-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
   .preset-row input { flex: 1; }
   .preset-row select { width: 90px; }
+  .diag { border: 1px solid #e5b4b4; background: #fff5f5; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .diag .err { color: #b3261e; font-weight: 600; }
+  .diag .fix { color: #137333; font-weight: 600; margin-top: 4px; }
   details summary { cursor: pointer; font-weight: 600; }
   .hint { font-size: 13px; color: #857c6f; }
   .modal-bg { position: fixed; inset: 0; background: rgba(22,19,15,.55); display: none;
@@ -184,6 +187,7 @@
 
   <div class="card">
     <h2>Kết quả chạy</h2>
+    <div id="diagnosisBox"></div>
     <div id="log">Chưa chạy gì. Bấm "Kiểm tra tất cả" để xem trạng thái, bấm "Setup" ở từng domain để tự động setup.</div>
   </div>
 </main>
@@ -264,6 +268,47 @@ let STATE = { config: {}, status: {} };
 function log(text) {
   const el = document.getElementById('log');
   el.textContent = text;
+}
+
+// ---------------------------------------------------------------- chan doan loi
+// Loi hay gap -> {error (hien do), fix (hien xanh)}. Hien o 'Ket qua chay'
+// sau moi lan Setup — de user biet loi gi va sua the nao, khoi doan.
+function diagnoseOne(text) {
+  const t = String(text || '');
+  let m = t.match(/Invalid request IP: ([\d.]+)/);
+  if (m) return { error: `Namecheap từ chối vì IP ${m[1]} chưa được whitelist (lỗi 1011150).`,
+    fix: `Vào Namecheap → Profile → Tools → API Access → Whitelisted IPs → thêm ${m[1]}. Đồng thời sửa ô "Client IP" trong mục Cài đặt thành ${m[1]} (hoặc bấm "Lấy IP hiện tại"). Nếu IP hay đổi (đang bật Cloudflare WARP/VPN) thì tắt WARP lúc chạy Setup, hoặc whitelist lại IP mới mỗi lần.` };
+  if (/Non-Cloudflare MX records exist/i.test(t)) return { error: 'Cloudflare không bật được Email Routing vì domain còn MX của nhà cung cấp mail cũ.',
+    fix: 'Tool đã tự xóa MX cũ và bật lại — chạy Setup lại là xong. (Nếu vẫn lỗi, xóa tay MX cũ ở DNS → Records rồi bật lại Email Routing.)' };
+  if (/2054|not verified/i.test(t)) return { error: 'Địa chỉ mail nhận chưa được xác minh nên rule không chạy.',
+    fix: 'Vào popup Edit → Email routing → thêm địa chỉ nhận rồi bấm link xác minh trong mail gửi đến địa chỉ đó.' };
+  if (/Invalid rule operation/i.test(t)) return { error: 'Catch-all (*) tạo sai endpoint (lỗi của bản tool cũ).',
+    fix: 'Cập nhật tool lên bản mới nhất (git pull) rồi chạy Setup lại — bản mới tạo catch-all qua endpoint riêng.' };
+  if (/403|Forbidden|Authentication error|invalid.*token/i.test(t)) return { error: 'Token Cloudflare bị từ chối (sai token hoặc thiếu quyền).',
+    fix: 'Kiểm tra lại token ở mục Cài đặt và quyền: Zone → Zone/DNS/Zone Settings/Email Routing Rules/Cache Rules → Edit; Account → Rulesets, Filter Lists → Edit.' };
+  if (/chua chon preset|preset .* khong ton tai/i.test(t)) return { error: 'Chưa chọn preset mặc định nên Setup không áp record mới.',
+    fix: 'Vào mục Preset record → chọn preset mặc định (vd "Web Hân") rồi chạy Setup lại.' };
+  if (/not in your account|khong co trong tai khoan/i.test(t)) return { error: 'Domain không nằm trong tài khoản Namecheap đang dùng.',
+    fix: 'Kiểm tra domain có trong tài khoản Namecheap (đúng username) không, hoặc đổi NS tay ở registrar đang giữ domain.' };
+  return null;
+}
+function showDiagnosis(results) {
+  const box = document.getElementById('diagnosisBox');
+  const seen = new Set();
+  const items = [];
+  (results || []).forEach(res => {
+    (res.steps || []).forEach(s => {
+      if (s.ok) return;
+      const d = diagnoseOne((s.step || '') + ' — ' + (s.detail || ''));
+      if (d && !seen.has(d.error)) { seen.add(d.error); items.push({ domain: res.domain, ...d }); }
+    });
+    if (res.error) {
+      const d = diagnoseOne(res.error);
+      if (d && !seen.has(d.error)) { seen.add(d.error); items.push({ domain: res.domain, ...d }); }
+    }
+  });
+  if (!items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = items.map(it => `<div class="diag"><div class="err">✗ ${esc(it.domain || '')}: ${esc(it.error)}</div><div class="fix">✓ Cách sửa: ${esc(it.fix)}</div></div>`).join('');
 }
 function api(path, body) {
   return fetch(path, { method: body ? 'POST' : 'GET',
@@ -434,6 +479,7 @@ async function setupBatch() {
   log(`Đang setup ${domains.length} domain… (mỗi domain có thể mất ~1 phút)`);
   const res = await api('/api/setup-batch', { domains });
   log((res.results || []).map(fmtSteps).join('\n\n'));
+  showDiagnosis(res.results || []);
   await refresh();
 }
 async function addBatchToManaged() {
@@ -562,6 +608,7 @@ async function setupSelected() {
   log(`Đang setup ${domains.length} domain…`);
   const res = await api('/api/setup-batch', { domains });
   log((res.results || []).map(fmtSteps).join('\n\n'));
+  showDiagnosis(res.results || []);
   await refresh();
 }
 async function applyHttpsSelected() {
@@ -799,6 +846,7 @@ async function setupOne(d) {
   log(`Đang setup ${d}… (có thể mất ~1 phút nếu đợi DNS lan truyền)`);
   const res = await api('/api/setup', { domain: d });
   log(fmtSteps(res));
+  showDiagnosis([res]);
   await refresh();
 }
 async function setupAll() {
@@ -806,6 +854,7 @@ async function setupAll() {
   log('Đang setup tất cả domain… (mỗi domain có thể mất ~1 phút)');
   const res = await api('/api/setup-all', {});
   log((res.results || []).map(fmtSteps).join('\n\n'));
+  showDiagnosis(res.results || []);
   await refresh();
 }
 async function applyPreset(d) {

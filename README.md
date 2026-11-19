@@ -26,13 +26,28 @@ quyền:
 | Zone — Zone Settings — Edit | đọc/bật Email Routing, SSL/HTTPS |
 | Zone — Email Routing Rules — Edit | tạo/xóa rule forward mail |
 | Account — Email Routing Addresses — Edit | thêm địa chỉ nhận mail |
-| Zone — Rulesets — Edit | tạo rule By Pass (Cache Rules) |
+| Zone — Cache Rules — Edit | tạo rule By Pass (Cache Rules) |
+| Account — Rulesets — Edit | bắt buộc kèm theo Cache Rules (Rulesets API) |
+| Account — Filter Lists — Edit | bắt buộc kèm theo Cache Rules |
 | Zone — Zone — Edit | xóa zone (nút "Xóa zone đã chọn") |
+
+Lưu ý: chỉ tick "Cache Rules" thì cột Cache vẫn báo "cần quyền token" —
+phải thêm cả **Account → Rulesets → Edit** và **Account → Filter Lists →
+Edit**. Sau khi sửa quyền token thì bấm "Kiểm tra tất cả" để bảng cập
+nhật lại (trạng thái cũ không tự đổi).
 
 Account ID lấy ở URL dashboard (`dash.cloudflare.com/<account-id>`) — đã điền
 sẵn nếu bạn dùng tài khoản cũ, sửa lại nếu khác.
 
 ### 2. Namecheap API (để đổi NS không cần trình duyệt)
+Cần bật API access trong tài khoản Namecheap (Profile → Tools) và
+**whitelist IP máy chạy tool** (ClientIp). IP đổi (mạng động, bật
+Cloudflare WARP/VPN) thì phải whitelist lại — bấm nút "Lấy IP hiện tại"
+ở mục Cài đặt để xem IP hiện tại. Nếu Setup báo lỗi 1011150 "Invalid
+request IP: ..." thì IP đó chưa được whitelist — thêm đúng IP đó vào
+Namecheap Profile → Tools → API Access → Whitelisted IPs, đồng thời sửa
+ô Client IP trong Cài đặt thành IP đó. Sau mỗi lần Setup lỗi, tool hiện
+ô chẩn đoán ở mục "Kết quả chạy": dòng đỏ là lỗi, dòng xanh là cách sửa.
 
 - Namecheap → Profile → Tools → API Access: bật lên, lấy **API key**.
 - **Whitelist IP** máy chạy tool (nút "Lấy IP hiện tại" trong giao diện sẽ

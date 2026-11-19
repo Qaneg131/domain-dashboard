@@ -129,23 +129,32 @@ class MockHandler(BaseHTTPRequestHandler):
             cmd = q.get("Command", [""])[0]
             sld, tld = q.get("SLD", [""])[0], q.get("TLD", [""])[0]
             dom = f"{sld}.{tld}"
-            if cmd == "namecheap.domains.dns.getList":
+            # XML that co xmlns mac dinh nhu Namecheap that (de test boc
+            # namespace); domain badip.com gia lap loi 1011150.
+            NS = ' xmlns="http://api.namecheap.com/xml.response"'
+            if dom == "badip.com":
+                xml = (f'<?xml version="1.0" encoding="utf-8"?>'
+                       f'<ApiResponse Status="ERROR"{NS}><Errors>'
+                       f'<Error Number="1011150">Invalid request IP: 9.9.9.9</Error>'
+                       f'</Errors><Warnings /><RequestedCommand />'
+                       f'<Server>Server 1</Server></ApiResponse>')
+            elif cmd == "namecheap.domains.dns.getList":
                 ns = STATE["nc_ns"].get(dom, ["dns1.registrar-servers.com",
                                                "dns2.registrar-servers.com"])
                 items = "".join(f"<Nameserver>{n}</Nameserver>" for n in ns)
-                xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"><Errors/>'
+                xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
                        f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
                        f'<DomainDNSGetListResult Domain="{dom}" IsUsingOurDNS="false">'
                        f"{items}</DomainDNSGetListResult></CommandResponse></ApiResponse>")
             elif cmd == "namecheap.domains.dns.setCustom":
                 ns = q.get("Nameservers", [""])[0].split(",")
                 STATE["nc_ns"][dom] = [n.strip().lower() for n in ns if n.strip()]
-                xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"><Errors/>'
+                xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
                        f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
                        f'<DomainDNSSetCustomResult Domain="{dom}" Updated="true" />'
                        f'</CommandResponse></ApiResponse>')
             else:
-                xml = ('<?xml version="1.0"?><ApiResponse Status="ERROR"><Errors>'
+                xml = (f'<?xml version="1.0"?><ApiResponse Status="ERROR"{NS}><Errors>'
                        '<Error Number="101">unknown command</Error></Errors></ApiResponse>')
             body = xml.encode()
             self.send_response(200)
@@ -616,6 +625,14 @@ def main():
     assert not any(r["type"] == "MX" and "host.com" in r["content"]
                    for r in cf.list_records(z7["id"]))
     print("  OK", flush=True)
+
+    print("TEST 23: Namecheap XML co xmlns + loi 1011150 hien ro IP...", flush=True)
+    try:
+        nc.set_nameservers("badip.com", [NS1, NS2])
+        raise AssertionError("le ra phai loi 1011150")
+    except Exception as e:
+        assert "9.9.9.9" in str(e) and "whitelist" in str(e), e
+        print("  OK:", str(e)[:100], flush=True)
 
     srv.shutdown()
     print("ALL TESTS PASSED")
