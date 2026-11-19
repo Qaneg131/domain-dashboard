@@ -125,6 +125,19 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   lỗi này để các domain sau không lỗi theo — đợi ~2 phút rồi chạy
   lại chỉ những domain chưa xong. Mẹo: đừng chạy Kiểm tra tất cả +
   Setup cùng lúc.
+  - **Setup loat 5–10 domain** — mỗi domain giờ chỉ gọi Namecheap
+    1 lần (chỉ `setCustom`): sau khi đổi NS, tool đợi DNS công
+    (DoH) xác nhận — DNS đã thấy NS mới thì chắc chắn registrar đã
+    ghi đúng nên khỏi gọi `getList` xác minh thêm; chỉ khi DNS chưa
+    xác nhận (lan truyền chậm) mới gọi `getList` để kiểm tra phía
+    registrar. Check sau mỗi lần setup cũng bỏ qua Namecheap
+    (registrar NS xem lại sau trong popup Edit). Giữa các domain
+    trong loat Setup có nghỉ 5 giây. Tính ra setup 10 domain chỉ
+    còn ~10 call Namecheap, rải ra mấy phút — chạy lẻ từng cái được
+    thì chạy loat 5–10 cái cũng được. Lưu ý: nếu máy đang bật
+    WARP/VPN thì IP ra ngoài là IP chung (nhiều người xài ké), quota
+    Namecheap tính theo IP nên dễ bị dính hơn — tắt WARP/VPN lúc
+    setup loat lớn nếu vẫn bị.
 - **Kiểm tra nhanh DNS** — nút này dùng chung danh sách zone của tài
   khoản (giống bên tab mail) + DNS công (DoH) để biết ngay domain nào
   NS đã set, **không cần check đầy đủ từng domain**: không gọi
