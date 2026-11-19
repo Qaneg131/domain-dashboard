@@ -61,7 +61,13 @@ class NCClient:
             raise NCError("Namecheap tra ve XML khong doc duoc")
         if root.get("Status") != "OK":
             errs = [e.text for e in root.findall(".//Error") if e.text]
-            raise NCError("; ".join(errs) or "Namecheap API error")
+            if errs:
+                raise NCError("; ".join(errs))
+            # Khong co <Error> doc duoc — kem raw XML de doan nguyen nhan
+            # (vd domain khong co trong tai khoan, IP chua whitelist...).
+            raw_txt = " ".join(raw.decode("utf-8", errors="replace").split())
+            raise NCError(f"Namecheap API error (Status={root.get('Status')}) "
+                          f"— tra ve: {raw_txt[:300]}")
         return root
 
     def get_nameservers(self, domain):

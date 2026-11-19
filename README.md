@@ -49,10 +49,16 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   bằng DNS thật), Record (có record không, có khớp preset không),
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
 - **Setup** — 1 click: tạo/lấy zone Cloudflare → đổi NS ở Namecheap (API)
-  → áp preset record → bật Email Routing + tạo rule theo email preset
-  → set HTTPS theo https preset (mặc định: SSL Flexible + Always Use HTTPS
-  bật + Minimum TLS 1.2 + Auto HTTPS Rewrites bật). Domain nào NS đã set
-  rồi thì tự bỏ qua bước đó.
+  → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo
+  rule theo email preset → set HTTPS theo https preset (mặc định: SSL
+  Flexible + Always Use HTTPS bật + Minimum TLS 1.2 + Auto HTTPS Rewrites
+  bật). Domain nào NS đã set rồi thì tự bỏ qua bước đó. **Lưu ý:** Setup
+  luôn xóa record cũ (chỉ giữ lại record hệ thống của Email Routing) nên
+  phải kiểm tra preset mặc định có đúng IP/server của bạn không trước khi
+  bấm — nếu chưa chọn preset mặc định, Setup vẫn xóa record cũ rồi báo
+  rõ trong log để bạn chọn preset rồi Setup lại. Nếu domain còn MX của
+  nhà cung cấp mail cũ (Google/Zoho/...), Setup tự xóa MX đó rồi mới bật
+  Email Routing (lỗi 2008 của Cloudflare).
 - **Setup theo danh sách** — dán nhiều domain (mỗi dòng 1 domain), bấm
   Setup là chạy từng domain một với đủ các bước trên. Chỉ xử lý đúng các
   domain trong ô này, không động đến domain khác.
@@ -82,7 +88,9 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   3 MX + SPF + DKIM).
 - **Email preset** — rule forward áp trong lúc Setup, mặc định 2 rule:
   `info@` và `*` (catch-all) → địa chỉ nhận bạn nhập. Địa chỉ nhận phải
-  bấm link xác minh trong mail thì rule mới chạy.
+  bấm link xác minh trong mail thì rule mới chạy. Catch-all là rule đặc
+  biệt của Cloudflare (endpoint riêng `.../rules/catch_all`, chỉ cho 1
+  địa chỉ nhận) — tool tự xử lý, không tạo qua endpoint rule thường.
 - **Thêm/xóa domain**, **Kiểm tra tất cả**, **Setup tất cả**.
 
 ## File cấu hình

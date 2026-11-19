@@ -33,7 +33,8 @@ STATE = {
 
 def _zone_state(zid):
     STATE["email"].setdefault(zid, {"enabled": False, "status": "unconfigured",
-                                    "rules": [], "addresses": []})
+                                    "rules": [], "addresses": [],
+                                    "catch_all": None})
     STATE["settings"].setdefault(zid, {"ssl": "flexible", "always_use_https": "off",
                                        "automatic_https_rewrites": "off",
                                        "min_tls_version": "1.0"})
@@ -85,10 +86,21 @@ class MockHandler(BaseHTTPRequestHandler):
                     self._json(self._cf_ok({"enabled": em["enabled"], "status": em["status"]}))
                     return
                 if len(parts) == 7 and parts[6] == "rules":
-                    self._json(self._cf_ok(em["rules"]))
+                    # API that tra ca catch-all trong list (matchers [{type: all}]).
+                    rules = list(em["rules"])
+                    if em.get("catch_all"):
+                        rules.append(em["catch_all"])
+                    self._json(self._cf_ok(rules))
                     return
                 if len(parts) == 7 and parts[6] == "addresses":
                     self._json(self._cf_ok(em["addresses"]))
+                    return
+                if len(parts) == 8 and parts[6] == "rules" and parts[7] == "catch_all":
+                    ca = em.get("catch_all")
+                    if ca is None:
+                        self._cf_err("catch-all not found", 404)
+                    else:
+                        self._json(self._cf_ok(ca))
                     return
             if len(parts) == 6 and parts[4] == "settings":
                 name = parts[5]
@@ -175,6 +187,13 @@ class MockHandler(BaseHTTPRequestHandler):
             if len(parts) >= 6 and parts[4] == "email" and parts[5] == "routing":
                 em = STATE["email"][zid]
                 if len(parts) == 7 and parts[6] == "enable":
+                    # API that: con MX khong phai cua Cloudflare thi loi 2008.
+                    bad_mx = [r for r in STATE["records"].get(zid, [])
+                              if r.get("type") == "MX"
+                              and not str(r.get("content", "")).endswith(".mx.cloudflare.net")]
+                    if bad_mx:
+                        self._cf_err("Non-Cloudflare MX records exist", 400)
+                        return
                     em["enabled"] = True
                     em["status"] = "ready"
                     # Gia lap: enable se them/khoa MX + SPF + DKIM.
@@ -195,6 +214,11 @@ class MockHandler(BaseHTTPRequestHandler):
                     self._json(self._cf_ok({"enabled": False, "status": "unconfigured"}))
                     return
                 if len(parts) == 7 and parts[6] == "rules":
+                    # API that: POST all-matcher vao /rules bi tu choi.
+                    mts = body.get("matchers") or []
+                    if mts and mts[0].get("type") == "all":
+                        self._cf_err("Invalid rule operation", 400)
+                        return
                     rid = f"rule-{STATE['next_id']}"
                     STATE["next_id"] += 1
                     rule = {"id": rid, "name": body.get("name", ""),
@@ -235,6 +259,19 @@ class MockHandler(BaseHTTPRequestHandler):
             rs["rules"] = body.get("rules", rs["rules"])
             self._json(self._cf_ok(rs))
             return
+        if len(parts) == 8 and parts[:3] == ["client", "v4", "zones"] \
+                and parts[4] == "email" and parts[5] == "routing" \
+                and parts[6] == "rules" and parts[7] == "catch_all":
+            zid = parts[3]
+            _zone_state(zid)
+            em = STATE["email"][zid]
+            ca = {"id": "catch_all", "name": body.get("name", "Catch-all"),
+                  "matchers": body.get("matchers", [{"type": "all"}]),
+                  "actions": body.get("actions", []),
+                  "enabled": body.get("enabled", True)}
+            em["catch_all"] = ca
+            self._json(self._cf_ok(ca))
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -273,6 +310,10 @@ class MockHandler(BaseHTTPRequestHandler):
                 return
             if len(parts) == 8 and parts[4] == "email" and parts[5] == "routing" and parts[6] == "rules":
                 rid = parts[7]
+                if rid == "catch_all":
+                    # API that: khong xoa catch-all qua /rules/{id}.
+                    self._cf_err("Invalid rule operation", 400)
+                    return
                 em = STATE["email"].get(zid, {})
                 em["rules"] = [r for r in em.get("rules", []) if r["id"] != rid]
                 self._json(self._cf_ok({"id": rid}))
@@ -375,10 +416,21 @@ def main():
     assert er2["enabled"] is True and er2["status"] == "ready", er2
     # Enable da them MX/SPF/DKIM vao records.
     assert any(r["type"] == "MX" for r in cf.list_records(z["id"]))
-    rule = cf.create_email_rule(z["id"], "*", ["owner@gmail.com"])
+    # Rule thuong: tao + xoa duoc qua /rules.
+    lit = cf.create_email_rule(z["id"], "info@welvella.com", ["owner@gmail.com"])
+    assert len(cf.list_email_rules(z["id"])) == 1
+    cf.delete_email_rule(z["id"], lit["id"])
+    assert cf.list_email_rules(z["id"]) == []
+    # Catch-all: endpoint rieng, khong xoa duoc qua /rules/{id} (API that).
+    rule = cf.set_catch_all(z["id"], ["owner@gmail.com"])
     assert rule["matchers"] == [{"type": "all"}], rule
     assert len(cf.list_email_rules(z["id"])) == 1
-    cf.delete_email_rule(z["id"], rule["id"])
+    try:
+        cf.delete_email_rule(z["id"], rule["id"])
+        raise AssertionError("le ra phai loi Invalid rule operation")
+    except Exception as e:
+        assert "Invalid rule operation" in str(e), e
+    STATE["email"][z["id"]]["catch_all"] = None  # don dep cho test sau
     assert cf.list_email_rules(z["id"]) == []
     addr = cf.create_email_address(z["id"], "owner@gmail.com")
     assert addr["email"] == "owner@gmail.com" and addr["verified"] is False
@@ -495,11 +547,74 @@ def main():
     assert len(rs2["rules"]) == 1 and rs2["rules"][0]["description"] == "Cache static", rs2
     print("  OK", flush=True)
 
-    print("TEST 18: delete_zone...", flush=True)
-    z3, _created = cf.get_or_create_zone("test11.com")
-    assert cf.get_zone("test11.com") is not None
-    cf.delete_zone(z3["id"])
-    assert cf.get_zone("test11.com") is None
+    print("TEST 19: catch-all qua endpoint rieng; POST all-matcher vao /rules bi tu choi...", flush=True)
+    z4, _c = cf.get_or_create_zone("catchtest.com")
+    assert cf.get_catch_all(z4["id"]) is None
+    # Duong cu (POST {type: all} vao /rules) — API that tra 'Invalid rule operation'.
+    try:
+        cf._req("POST", f"/zones/{z4['id']}/email/routing/rules",
+                {"name": "x", "matchers": [{"type": "all"}],
+                 "actions": [{"type": "forward", "value": ["owner@gmail.com"]}],
+                 "enabled": True})
+        raise AssertionError("le ra phai loi Invalid rule operation")
+    except Exception as e:
+        assert "Invalid rule operation" in str(e), e
+    ca = cf.set_catch_all(z4["id"], ["owner@gmail.com"])
+    assert ca["matchers"] == [{"type": "all"}], ca
+    assert ca["actions"] == [{"type": "forward", "value": ["owner@gmail.com"]}], ca
+    assert cf.get_catch_all(z4["id"])["actions"][0]["value"] == ["owner@gmail.com"]
+    # create_email_rule('*') phai tu chuyen sang catch-all endpoint.
+    cf.create_email_rule(z4["id"], "*", ["other@gmail.com"])
+    assert cf.get_catch_all(z4["id"])["actions"][0]["value"] == ["other@gmail.com"]
+    print("  OK", flush=True)
+
+    print("TEST 20: setup domain co MX cu — records step xoa MX, email bat duoc, catch-all dung...", flush=True)
+    z5, _c = cf.get_or_create_zone("mxold.com")
+    cf.create_record(z5["id"], "MX", "mxold.com", "aspmx.l.google.com", False)
+    cf.create_record(z5["id"], "A", "mxold.com", "9.9.9.9", True)
+    cfg6 = dict(cfg)
+    cfg6["email_preset"] = {"enabled": True, "rules": [
+        {"match": "support@", "to": "owner@gmail.com"},
+        {"match": "*", "to": "owner@gmail.com"}]}
+    cfg6["https_preset"] = {"enabled": True, "ssl": "flexible",
+                            "always_https": "on", "min_tls_version": "1.2",
+                            "rewrites": "on"}
+    # NS da tro dung tren DoH gia lap de qua buoc NS.
+    STATE["nc_ns"]["mxold.com"] = [NS1, NS2]
+    res9 = dash.setup_domain("mxold.com", "web", cfg6)
+    assert res9["ok"], res9
+    recs5 = cf.list_records(z5["id"])
+    assert not any(r["type"] == "MX" and "google" in r["content"] for r in recs5), recs5
+    assert any(r["type"] == "MX" and r["content"].startswith("route") for r in recs5), recs5
+    assert sum(1 for r in recs5 if r["type"] == "A" and r["content"] == "1.11.11.11") == 2, recs5
+    assert not any(r["type"] == "A" and r["content"] == "9.9.9.9" for r in recs5), recs5
+    assert cf.get_catch_all(z5["id"])["actions"][0]["value"] == ["owner@gmail.com"]
+    assert len(cf.list_email_rules(z5["id"])) == 2
+    print("  OK", flush=True)
+
+    print("TEST 21: setup khong co preset — van xoa record cu, log canh bao ro...", flush=True)
+    z6, _c = cf.get_or_create_zone("nopreset.com")
+    cf.create_record(z6["id"], "A", "nopreset.com", "8.8.8.8", True)
+    STATE["nc_ns"]["nopreset.com"] = [NS1, NS2]
+    cfg7 = dict(cfg6)
+    cfg7["email_preset"] = {"enabled": False, "rules": []}
+    cfg7["default_preset"] = ""  # gia lap user chua chon preset mac dinh
+    res10 = dash.setup_domain("nopreset.com", "", cfg7)
+    assert res10["ok"] is False, res10
+    assert any(s["step"] == "Xoa record cu" and s["ok"] is False for s in res10["steps"]), res10["steps"]
+    assert cf.list_records(z6["id"]) == [], cf.list_records(z6["id"])
+    print("  OK", flush=True)
+
+    print("TEST 22: _apply_email_preset tu xoa MX cu khi bat email (khong qua buoc records)...", flush=True)
+    z7, _c = cf.get_or_create_zone("mxretry.com")
+    cf.create_record(z7["id"], "MX", "mxretry.com", "mx1.mail.host.com", False)
+    cfg8 = dict(cfg6)
+    steps22, ok22 = dash._apply_email_preset("mxretry.com", cfg8, cf, {"id": z7["id"]})
+    assert ok22, steps22
+    assert any(s["step"] == "Xoa MX cu" for s in steps22), steps22
+    assert cf.get_email_routing(z7["id"])["enabled"] is True
+    assert not any(r["type"] == "MX" and "host.com" in r["content"]
+                   for r in cf.list_records(z7["id"]))
     print("  OK", flush=True)
 
     srv.shutdown()

@@ -148,6 +148,14 @@ def main():
     st2 = call("GET", "/api/state")
     assert "batch2.com" not in st2["config"]["domains"], st2["config"]["domains"]
     print("DELETE-ZONES-BATCH OK: batch2.com da xoa khoi bang", flush=True)
+
+    # Popup tao rule '*' (catch-all) — phai di qua endpoint rieng, khong trung.
+    er = call("POST", "/api/email-rule", {"domain": "batch1.com", "match": "*",
+                                          "destinations": ["owner@gmail.com"]})
+    assert er["ok"], er
+    det5 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    assert len(det5["email_detail"]["rules"]) == 2, det5["email_detail"]
+    print("EMAIL-RULE CATCH-ALL OK: khong tao trung rule", flush=True)
     mock.shutdown()
     print("E2E OK")
 

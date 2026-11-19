@@ -220,7 +220,25 @@ def _apply_email_preset(domain, cfg, cf, zone):
     try:
         er = cf.get_email_routing(zone["id"])
         if not er.get("enabled"):
-            cf.enable_email_routing(zone["id"])
+            try:
+                cf.enable_email_routing(zone["id"])
+            except Exception as e:
+                # Loi 2008 'Non-Cloudflare MX records exist': zone con MX
+                # cua nha cung cap cu (Google/Zoho/...) thi khong bat duoc.
+                # Cach sua cua chinh Cloudflare: xoa MX cu roi bat lai ngay.
+                if "mx" not in str(e).lower():
+                    raise
+                recs = cf.list_records(zone["id"])
+                deleted = 0
+                for rec in recs:
+                    if rec.get("type") == "MX" and not str(
+                            rec.get("content", "")).endswith(".mx.cloudflare.net"):
+                        cf.delete_record(zone["id"], rec["id"])
+                        deleted += 1
+                steps.append({"step": "Xoa MX cu", "ok": True,
+                              "detail": f"da xoa {deleted} MX cu (khong phai cua "
+                                        "Cloudflare) de bat Email Routing"})
+                cf.enable_email_routing(zone["id"])
             steps.append({"step": "Bat Email Routing", "ok": True,
                           "detail": "da them/khoa 3 MX + SPF + DKIM"})
         existing = cf.list_email_rules(zone["id"])
@@ -232,10 +250,33 @@ def _apply_email_preset(domain, cfg, cf, zone):
             vals = [m.get("value", "") for m in mts if m.get("value")]
             return vals[0] if vals else ""
 
-        existing_by_match = {match_key(r): r for r in existing}
+        # Catch-all khong nam trong existing_by_match — no duoc xu ly
+        # rieng qua endpoint /rules/catch_all (xoa/tap qua /rules/{id}
+        # se bi API tra 'Invalid rule operation').
+        existing_by_match = {match_key(r): r for r in existing
+                             if match_key(r) != "*"}
         for r in rules:
             match = _expand_email_match(domain, r["match"])
             dests = [x.strip() for x in str(r["to"]).split(",") if x.strip()]
+            if match == "*":
+                # Catch-all: singleton, GET/PUT /rules/catch_all, chi 1 dich.
+                cur_ca = cf.get_catch_all(zone["id"])
+                cur_dests = []
+                if cur_ca:
+                    for a in cur_ca.get("actions") or []:
+                        cur_dests.extend(a.get("value") or [])
+                if cur_ca and cur_ca.get("enabled") \
+                        and sorted(cur_dests) == sorted(dests[:1]):
+                    steps.append({"step": "Rule * (catch-all)", "ok": True,
+                                  "detail": "da co san"})
+                    continue
+                cf.set_catch_all(zone["id"], dests[:1])
+                detail = "da tao" if not cur_ca else "da cap nhat"
+                if len(dests) > 1:
+                    detail += " (catch-all chi cho 1 dia chi nhan — lay dia chi dau tien)"
+                steps.append({"step": f"Rule * (catch-all) -> {dests[0]}",
+                              "ok": True, "detail": detail})
+                continue
             cur = existing_by_match.get(match)
             cur_dests = []
             if cur:
@@ -300,14 +341,22 @@ def setup_domain(domain, preset_name, cfg):
     if not ns_ok:
         return {"domain": domain, "ok": False, "steps": steps}
 
-    # 3. Records theo preset.
-    if preset_name:
-        preset = cfg.get("presets", {}).get(preset_name)
-        if not preset:
-            step(f"Ap preset '{preset_name}'", False, "preset khong ton tai")
-        else:
-            try:
-                deleted = cf.delete_all_records(zone["id"])
+    # 3. Xoa het record cu (LUON chay khi Setup — theo yeu cau cua user:
+    # domain nao dem di setup thi tu dong xoa record cu) + ap preset neu co.
+    # delete_all_records GIU LAI record he thong cua Email Routing (MX/SPF/
+    # DKIM cua Cloudflare) nen khong lam hong email da bat; MX cua nha
+    # cung cap cu thi bi xoa — nho vay buoc Email Routing moi bat duoc
+    # (khong thi loi 2008 'Non-Cloudflare MX records exist').
+    try:
+        deleted = cf.delete_all_records(zone["id"])
+        if preset_name:
+            preset = cfg.get("presets", {}).get(preset_name)
+            if not preset:
+                step("Xoa record cu", False,
+                     f"da xoa {deleted} record cu nhung preset '{preset_name}' "
+                     "khong ton tai — vao muc Preset record de tao/chon preset "
+                     "mac dinh roi Setup lai")
+            else:
                 added = 0
                 for r in preset:
                     cf.create_record(zone["id"], r["type"].upper(),
@@ -317,9 +366,13 @@ def setup_domain(domain, preset_name, cfg):
                     added += 1
                 step(f"Ap preset '{preset_name}'", True,
                      f"da xoa {deleted} record cu, them {added} record moi")
-            except Exception as e:
-                step(f"Ap preset '{preset_name}'", False, str(e))
-                return {"domain": domain, "ok": False, "steps": steps}
+        else:
+            step("Xoa record cu", False,
+                 f"da xoa {deleted} record cu nhung chua chon preset mac dinh "
+                 "— vao muc Preset record de chon preset mac dinh roi Setup lai")
+    except Exception as e:
+        step("Xoa record cu / Ap preset", False, str(e))
+        return {"domain": domain, "ok": False, "steps": steps}
 
     # 4. Email routing theo preset (sau records de MX/SPF/DKIM khong bi xoa).
     email_steps, _email_ok = _apply_email_preset(domain, cfg, cf, zone)

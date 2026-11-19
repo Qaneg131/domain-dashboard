@@ -201,16 +201,42 @@ class CFClient:
     def create_email_rule(self, zone_id, match_value, destinations, name=None):
         """Tao rule forward. match_value: 'info@domain.com' hoac '*' (catch-all).
         destinations: list email nhan. Dia chi dich phai duoc verify truoc
-        (loi 2054 neu chua) — xem create_email_address."""
+        (loi 2054 neu chua) — xem create_email_address.
+        LUU Y: '*' KHONG phai rule thuong — no la singleton o endpoint
+        rieng /rules/catch_all (POST all-matcher vao /rules bi API tra
+        'Invalid rule operation'), nen '*' duoc chuyen sang set_catch_all."""
         if match_value == "*":
-            matchers = [{"type": "all"}]
-        else:
-            matchers = [{"type": "literal", "field": "to", "value": match_value}]
+            return self.set_catch_all(zone_id, destinations)
+        matchers = [{"type": "literal", "field": "to", "value": match_value}]
         body = {"name": name or f"forward {match_value}",
                 "matchers": matchers,
                 "actions": [{"type": "forward", "value": list(destinations)}],
                 "enabled": True}
         payload = self._req("POST", f"/zones/{zone_id}/email/routing/rules", body)
+        return self._ok(payload)
+
+    def get_catch_all(self, zone_id):
+        """Rule catch-all hien tai hoac None (chua set / dang tat)."""
+        try:
+            payload = self._req(
+                "GET", f"/zones/{zone_id}/email/routing/rules/catch_all")
+            return self._ok(payload)
+        except CFError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                return None
+            raise
+
+    def set_catch_all(self, zone_id, destinations, name="Catch-all"):
+        """PUT catch-all (singleton cua zone): forward moi mail khong khop
+        rule nao. Catch-all chi cho DUNG 1 dia chi dich (API bat buoc),
+        nen chi lay dia chi dau tien."""
+        dest = list(destinations)[:1]
+        body = {"name": name,
+                "matchers": [{"type": "all"}],
+                "actions": [{"type": "forward", "value": dest}],
+                "enabled": True}
+        payload = self._req(
+            "PUT", f"/zones/{zone_id}/email/routing/rules/catch_all", body)
         return self._ok(payload)
 
     def delete_email_rule(self, zone_id, rule_id):
