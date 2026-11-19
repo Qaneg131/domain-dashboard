@@ -894,17 +894,22 @@ async function deleteZonesSelected() {
   notifyResults('Xóa zone đã chọn xong', res.results || []);
 }
 async function checkSelected() {
+  // Dung chung loat runBatchCheck nhu 'Kiem tra tat ca' / 'Kiem tra lai
+  // domain loi' — 1 nut Dung dung chung cho ca 3 luong, ket qua bao cao
+  // truc tuyen tung loat (bang cap nhat ngay sau moi loat).
   const domains = selectedDomains();
   if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
-  log(`Đang kiểm tra ${domains.length} domain…`);
-  for (const d of domains) {
-    const res = await api('/api/check', { domain: d });
-    STATE.status = { ...STATE.status, ...res.status };
-  }
-  renderTable();
-  log('Đã kiểm tra xong ' + domains.length + ' domain.');
+  const r = await runBatchCheck(domains, `Kiểm tra đã chọn — ${domains.length} domain`);
+  if (!r) return;
   const errs = domains.filter(d => isErrorStatus(STATE.status[d]));
-  notify('Kiểm tra đã chọn xong', `Đã kiểm tra xong <b>${domains.length}</b> domain.` + (errs.length ? `<br>Còn <b>${errs.length}</b> domain bị lỗi: ${namesHtml(errs)}` : '<br>Không còn domain nào bị lỗi.'));
+  if (r.done) {
+    setBatchProgress(`Đã kiểm tra xong ${domains.length} domain đã chọn.`);
+    log(`Đã kiểm tra xong ${domains.length} domain đã chọn.`);
+    notify('Kiểm tra đã chọn xong', `Đã kiểm tra xong <b>${domains.length}</b> domain.` + (errs.length ? `<br>Còn <b>${errs.length}</b> domain bị lỗi: ${namesHtml(errs)}` : '<br>Không còn domain nào bị lỗi.'));
+  } else {
+    setBatchProgress(`Đã dừng ở ${r.checked}/${r.total} — bấm lại để tiếp tục.`);
+    log(`Đã dừng kiểm tra đã chọn ở ${r.checked}/${r.total} domain.`);
+  }
 }
 
 // ---------------------------------------------------------------- popup Edit
@@ -1203,9 +1208,7 @@ async function runBatchCheck(list, label) {
       break;
     }
     const batch = BATCH_CHECK.list.slice(BATCH_CHECK.index, BATCH_CHECK.index + BATCH_SIZE);
-    const from = startGood + BATCH_CHECK.index + 1;
-    const to = startGood + BATCH_CHECK.index + batch.length;
-    setBatchProgress(`Đang kiểm tra ${from}–${to}/${all.length}…`);
+    setBatchProgress(`Đang kiểm tra ${BATCH_CHECK.index + 1}–${BATCH_CHECK.index + batch.length}/${BATCH_CHECK.list.length}…`);
     const res = await api('/api/check', { domains: batch });
     STATE.status = { ...STATE.status, ...res.status };
     BATCH_CHECK.index += batch.length;
