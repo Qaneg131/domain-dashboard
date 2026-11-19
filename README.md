@@ -47,7 +47,17 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   bằng DNS thật), Record (có record không, có khớp preset không),
   Email routing (bật chưa, mấy rule), HTTPS (SSL mode + Always Use HTTPS).
 - **Setup** — 1 click: tạo/lấy zone Cloudflare → đổi NS ở Namecheap (API)
-  → áp preset record. Domain nào NS đã set rồi thì tự bỏ qua bước đó.
+  → áp preset record → bật Email Routing + tạo rule theo email preset
+  → set HTTPS theo https preset (mặc định: SSL Flexible + Always Use HTTPS
+  bật + Minimum TLS 1.2 + Auto HTTPS Rewrites bật). Domain nào NS đã set
+  rồi thì tự bỏ qua bước đó.
+- **Setup theo danh sách** — dán nhiều domain (mỗi dòng 1 domain), bấm
+  Setup là chạy từng domain một với đủ các bước trên. Chỉ xử lý đúng các
+  domain trong ô này, không động đến domain khác.
+- **Chọn nhiều domain** — tick ô vuông ở đầu mỗi dòng trong bảng quản lý
+  rồi bấm "Setup đã chọn" / "Áp HTTPS đã chọn" / "Kiểm tra đã chọn".
+- **Tab "Tất cả trong tài khoản"** — liệt kê hết zone trong tài khoản
+  Cloudflare, có ô tìm kiếm, bấm "Thêm" để đưa domain vào bảng quản lý.
 - **Edit (popup)** — bấm Edit ở từng domain để chỉnh 4 mục:
   - **DNS**: xem NS (DNS công / Namecheap / Cloudflare), nút "Đồng bộ NS ngay".
   - **Record**: áp preset hoặc sửa tay từng record rồi Lưu.
@@ -57,10 +67,15 @@ NS sẽ báo "chưa cấu hình Namecheap API".
     mail cũ); địa chỉ nhận phải bấm link xác minh trong mail thì rule mới
     chạy.
   - **HTTPS**: SSL mode (Off/Flexible/Full/Full strict), Always Use HTTPS,
-    Auto HTTPS Rewrites. Khuyên dùng Full + Always Use HTTPS bật.
+    Minimum TLS Version, Auto HTTPS Rewrites. Mặc định khi Setup:
+    Flexible + Always Use HTTPS bật + TLS 1.2.
 - **Preset record** — lưu cấu hình record để áp nhanh, vd preset `web`:
   `A @ → 1.11.11.11`, `A www → 1.11.11.11`. Áp preset sẽ xóa hết record
-  cũ rồi thêm mới.
+  cũ rồi thêm mới (nhưng giữ lại record hệ thống của Email Routing:
+  3 MX + SPF + DKIM).
+- **Email preset** — rule forward áp trong lúc Setup, mặc định 2 rule:
+  `info@` và `*` (catch-all) → địa chỉ nhận bạn nhập. Địa chỉ nhận phải
+  bấm link xác minh trong mail thì rule mới chạy.
 - **Thêm/xóa domain**, **Kiểm tra tất cả**, **Setup tất cả**.
 
 ## File cấu hình
