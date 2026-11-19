@@ -193,6 +193,20 @@ def main():
     assert any(s["step"].startswith("Rule info@batch1.com") and s["detail"] == "da co san"
                for s in se["steps"]), se["steps"]
     print("SETUP-EMAIL OK: chi chay buoc email, rule cu giu nguyen", flush=True)
+
+    # Tu dong gop: /api/account-zones dua het zone vao danh sach quan ly
+    # (batch1.com co zone nhung chua trong bang); domain da xoa zone
+    # (batch2.com) thi khong dua lai.
+    az2 = call("GET", "/api/account-zones")
+    assert "batch1.com" in [z["name"] for z in az2["zones"]], az2
+    st2 = call("GET", "/api/state")
+    assert "batch1.com" in st2["config"]["domains"], st2["config"]["domains"]
+    assert "batch2.com" not in st2["config"]["domains"], st2["config"]["domains"]
+    # /api/check theo loat: mo trang nao tu kiem tra 5 domain trang do.
+    chk2 = call("POST", "/api/check", {"domains": ["batch1.com"]})
+    assert "batch1.com" in chk2["status"], chk2
+    assert chk2["status"]["batch1.com"]["zone"]["status"] == "active", chk2
+    print("AUTO-MERGE + CHECK-BATCH OK: het zone vao bang, check theo loat", flush=True)
     mock.shutdown()
     print("E2E OK")
 

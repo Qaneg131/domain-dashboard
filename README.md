@@ -75,10 +75,15 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   (active)". Đồng bộ rule: rule giống hệt thì giữ, rule trùng y hệt thì
   xóa bớt, rule cùng địa chỉ nhưng khác đích thì thay bằng rule preset,
   rule của địa chỉ khác giữ nguyên.
-- **Bảng quản lý** — bỏ tab "Tất cả trong tài khoản", hiện hết domain
-  (đang quản lý + trong tài khoản) ngay ngoài trang quản lý, có thanh
-  tìm kiếm lọc cả 2 loại, phân trang 5 domain/trang. Domain chưa trong
-  bảng có nút "Thêm" (thêm xong tự kiểm tra trạng thái ngay).
+- **Bảng quản lý** — hiện hết domain trong tài khoản, khỏi bấm Thêm:
+  mở trang là tool tự đưa hết zone vào bảng quản lý (domain nào bạn đã
+  xóa khỏi bảng thì không đưa lại). Có thanh tìm kiếm, phân trang
+  5 domain/trang; mở trang nào tool tự kiểm tra trạng thái 5 domain
+  trang đó (khỏi bấm "Kiểm tra tất cả"). Mỗi dòng hiện đủ trạng thái
+  như trên Cloudflare, badge Yes/No các cột luôn cùng 1 hàng, thông tin
+  phụ (NS, số record, số rule, SSL/TLS…) xuống hàng dưới. Mỗi dòng có
+  nút **GSC** riêng — bấm là mở popup Google Search Console đúng domain
+  đó để dán mã xác minh. Trang hiển thị full width.
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo

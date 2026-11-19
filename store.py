@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
     "nc_api_key": "",
     "nc_client_ip": "",
     "domains": ["elvellia.com", "welvella.com"],
+    # Domain user da xoa khoi bang quan ly — tai danh sach tai khoan se
+    # khong tu dua lai (chi them tay moi vao).
+    "unmanaged": [],
     "presets": {
         "web": [
             {"type": "A", "name": "@", "content": "1.11.11.11", "proxied": True},

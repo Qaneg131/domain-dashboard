@@ -627,6 +627,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 zones = _cf_client(cfg).list_zones()
+                # Tu dong dua het zone trong tai khoan vao danh sach quan
+                # ly — khoi phai bam Them tung domain. Domain nao user da
+                # xoa khoi bang (unmanaged) thi khong dua lai.
+                unmanaged = set(cfg.get("unmanaged") or [])
+                added = 0
+                for z in zones:
+                    nm = (z.get("name") or "").strip().lower()
+                    if nm and nm not in cfg["domains"] and nm not in unmanaged:
+                        cfg["domains"].append(nm)
+                        added += 1
+                if added:
+                    save_config(cfg)
                 self._json({"zones": [{"name": z.get("name"),
                                        "status": z.get("status"),
                                        "name_servers": z.get("name_servers", [])}
@@ -657,11 +669,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "domain da co trong danh sach"}, 400)
                 else:
                     cfg["domains"].append(d)
+                    cfg["unmanaged"] = [x for x in (cfg.get("unmanaged") or [])
+                                        if x != d]
                     save_config(cfg)
                     self._json({"ok": True, "domains": cfg["domains"]})
             elif path == "/api/domains/delete":
                 d = str(body.get("domain", "")).strip().lower()
                 cfg["domains"] = [x for x in cfg["domains"] if x != d]
+                # Ghi nho de lan sau tai danh sach tai khoan khong dua lai.
+                unm = set(cfg.get("unmanaged") or [])
+                unm.add(d)
+                cfg["unmanaged"] = sorted(unm)
                 st.pop(d, None)
                 save_config(cfg)
                 save_status(st)
@@ -672,6 +690,18 @@ class Handler(BaseHTTPRequestHandler):
                         st[d] = check_domain(d, cfg)
                     save_status(st)
                     self._json({"ok": True, "status": st})
+                elif body.get("domains"):
+                    # Kiem tra 1 loat domain (trang hien tai cua bang) —
+                    # mo trang nao tu kiem tra 5 domain trang do.
+                    out = {}
+                    for dd in body["domains"]:
+                        dd = str(dd).strip().lower()
+                        if not dd:
+                            continue
+                        st[dd] = check_domain(dd, cfg)
+                        out[dd] = st[dd]
+                    save_status(st)
+                    self._json({"ok": True, "status": out})
                 else:
                     d = str(body.get("domain", "")).strip().lower()
                     st[d] = check_domain(d, cfg)
@@ -1020,6 +1050,9 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         cf.delete_zone(zone["id"])
                         cfg["domains"] = [x for x in cfg["domains"] if x != d]
+                        unm = set(cfg.get("unmanaged") or [])
+                        unm.add(d)
+                        cfg["unmanaged"] = sorted(unm)
                         st.pop(d, None)
                         results.append({"domain": d, "ok": True,
                                         "detail": "da xoa zone tren Cloudflare"})

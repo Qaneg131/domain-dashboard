@@ -11,7 +11,7 @@
   header h1 { margin: 0; font-size: 20px; }
   header h1 span { color: #cf9a5f; }
   header p { margin: 4px 0 0; color: #b8b0a4; font-size: 13px; }
-  main { max-width: 1100px; margin: 0 auto; padding: 16px 24px 40px; }
+  main { max-width: none; margin: 0; padding: 16px 24px 40px; }
   .card { background: #fffdf9; border: 1px solid #e3ddd2; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
   .card h2 { margin: 0 0 12px; font-size: 16px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
@@ -364,7 +364,7 @@ async function refresh() {
   renderEmailTab();
   // Tai danh sach domain trong tai khoan de hien chung o bang quan ly
   // (chi tai 1 lan; loi thi im lang — bang quan ly van chay duoc).
-  if (!ACCOUNT_ZONES.length) loadAccountZones(true);
+  if (!ACCOUNT_LOADED) loadAccountZones(true);
 }
 
 function renderPresets() {
@@ -527,6 +527,7 @@ async function addBatchToManaged() {
 
 // ---------------------------------------------------------------- account tab
 let ACCOUNT_ZONES = [];
+let ACCOUNT_LOADED = false;
 function showDomainTab(which) {
   document.getElementById('managedTab').style.display = which === 'managed' ? '' : 'none';
   document.getElementById('emailTab').style.display = which === 'email' ? '' : 'none';
@@ -597,16 +598,10 @@ async function loadAccountZones(quiet) {
   const res = await api('/api/account-zones');
   if (res.error) { if (!quiet) alert(res.error); return; }
   ACCOUNT_ZONES = res.zones || [];
-  renderTable();
-}
-async function addZoneToManaged(d) {
-  await api('/api/domains', { domain: d });
+  ACCOUNT_LOADED = true;
+  // Server vua tu gop het zone vao danh sach quan ly — tai lai state
+  // de bang hien du domain.
   await refresh();
-  renderTable();
-  // Tu dong kiem tra trang thai ngay — khoi phai bam "Kiem tra tat ca".
-  const res = await api('/api/check', { domain: d });
-  STATE.status = { ...STATE.status, ...res.status };
-  renderTable();
 }
 async function saveSettings() {
   const body = {
@@ -630,11 +625,25 @@ async function getMyIp() {
 
 function yesNo(v) { return v ? '<span class="badge ok">Yes</span>' : '<span class="badge no">No</span>'; }
 
-// Bang quan ly hien ca domain dang quan ly (co checkbox, trang thai day
-// du) + domain trong tai khoan chua dua vao bang (chi zone status + NS,
-// nut Them). Tim kiem loc ca 2 loai, phan trang 5 domain/trang.
+// Bang quan ly hien het domain (tat ca zone trong tai khoan tu dua
+// vao bang, khoi bam Them). Tim kiem loc theo ten, phan trang
+// 5 domain/trang. Mo trang nao thi tu kiem tra trang thai 5 domain
+// trang do (khoi bam "Kiem tra tat ca").
 const PAGE_SIZE = 5;
 let MANAGED_PAGE = 1;
+const AUTO_CHECKING = new Set();
+async function autoCheckVisible(names) {
+  const need = names.filter(d => !STATE.status[d] && !AUTO_CHECKING.has(d));
+  if (!need.length) return;
+  need.forEach(d => AUTO_CHECKING.add(d));
+  try {
+    const res = await api('/api/check', { domains: need });
+    STATE.status = { ...STATE.status, ...res.status };
+    renderTable();
+  } finally {
+    need.forEach(d => AUTO_CHECKING.delete(d));
+  }
+}
 function managedRow(d) {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
@@ -643,16 +652,16 @@ function managedRow(d) {
         + (zone ? `<br><span class="muted">zone: ${esc(zone.status)}</span>` : '');
     const recs = s.records || [];
     const recCell = !zone ? '<span class="muted">—</span>'
-      : recs.length === 0 ? '<span class="badge no">No</span> <span class="muted">0 record</span>'
-      : yesNo(true) + ` <span class="muted">${recs.length} record${s.records_ok ? ' ✓ khớp preset' : ''}</span>`;
+      : recs.length === 0 ? '<span class="badge no">No</span><br><span class="muted">0 record</span>'
+      : yesNo(true) + `<br><span class="muted">${recs.length} record${s.records_ok ? ' ✓ khớp preset' : ''}</span>`;
     const em = s.email;
     const emCell = !zone ? '<span class="muted">—</span>'
-      : em && em.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
-      : yesNo(em && em.enabled) + (em && em.enabled ? ` <span class="muted">${em.rules || 0} rule</span>` : '');
+      : em && em.error ? `<span class="badge no">No</span><br><span class="muted">cần quyền token</span>`
+      : yesNo(em && em.enabled) + (em && em.enabled ? `<br><span class="muted">${em.rules || 0} rule</span>` : '');
     const ht = s.https;
     const htCell = !zone ? '<span class="muted">—</span>'
-      : ht && ht.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
-      : yesNo(ht && ht.ok) + (ht && ht.ssl ? ` <span class="muted">${esc(ht.ssl)}${ht.min_tls ? ' · TLS ' + esc(ht.min_tls) : ''}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
+      : ht && ht.error ? `<span class="badge no">No</span><br><span class="muted">cần quyền token</span>`
+      : yesNo(ht && ht.ok) + (ht && ht.ssl ? `<br><span class="muted">${esc(ht.ssl)}${ht.min_tls ? ' · TLS ' + esc(ht.min_tls) : ''}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
     const cacheCell = !zone ? '<span class="muted">—</span>'
       : s.cache_bypass === true ? '<span class="badge ok">By Pass</span>'
       : s.cache_bypass === false ? '<span class="badge no">No</span>'
@@ -664,42 +673,27 @@ function managedRow(d) {
       <td style="white-space:nowrap">
         <button class="small secondary" onclick="openEdit('${esc(d)}')">Edit</button>
         <button class="small" onclick="setupOne('${esc(d)}')">Setup</button>
+        <button class="small secondary" onclick="openGscModal('${esc(d)}')">GSC</button>
         <button class="small warn" onclick="removeDomain('${esc(d)}')">✕</button>
       </td></tr>`;
-}
-function accountRow(z) {
-  return `<tr>
-      <td></td>
-      <td><b>${esc(z.name)}</b><br><span class="muted">chưa trong bảng quản lý</span></td>
-      <td><span class="badge ${z.status === 'active' ? 'ok' : 'wait'}">${esc(z.status)}</span><br><span class="mono">${(z.name_servers || []).map(esc).join('<br>')}</span></td>
-      <td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td>
-      <td style="white-space:nowrap"><button class="small secondary" onclick="addZoneToManaged('${esc(z.name)}')">Thêm</button></td></tr>`;
 }
 function renderTable() {
   const cfg = STATE.config || {};
   const domains = cfg.domains || [];
   const q = (document.getElementById('domainSearch').value || '').toLowerCase();
-  const managed = new Set(domains);
-  const all = [
-    ...domains.filter(d => !q || d.toLowerCase().includes(q))
-      .map(d => ({ kind: 'managed', name: d })),
-    ...(ACCOUNT_ZONES || [])
-      .filter(z => !managed.has(z.name) && (!q || z.name.toLowerCase().includes(q)))
-      .map(z => ({ kind: 'account', zone: z })),
-  ];
-  document.getElementById('domainCount').textContent =
-    `${domains.length} domain quản lý · ${ACCOUNT_ZONES.length} domain trong tài khoản`;
+  const all = domains.filter(d => !q || d.toLowerCase().includes(q));
+  document.getElementById('domainCount').textContent = `${domains.length} domain`;
   const tb = document.getElementById('domainTable');
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   if (MANAGED_PAGE > totalPages) MANAGED_PAGE = totalPages;
   if (MANAGED_PAGE < 1) MANAGED_PAGE = 1;
   const pageRows = all.slice((MANAGED_PAGE - 1) * PAGE_SIZE, MANAGED_PAGE * PAGE_SIZE);
-  tb.innerHTML = pageRows.length ? pageRows.map(r =>
-    r.kind === 'managed' ? managedRow(r.name) : accountRow(r.zone)).join('')
+  tb.innerHTML = pageRows.length ? pageRows.map(d => managedRow(d)).join('')
     : '<tr><td colspan="8" class="muted">Không tìm thấy domain nào.</td></tr>';
   renderPager(totalPages, all.length);
   document.getElementById('checkAll').checked = false;
   updateSelectedCount();
+  autoCheckVisible(pageRows);
 }
 function renderPager(totalPages, totalRows) {
   const el = document.getElementById('pager');
@@ -956,9 +950,10 @@ async function saveGsc() {
 // ---------------------------------------------------------------- popup GSC rieng
 // Nut "Google Search Console" o ngoai (khong can mo Edit) — chon domain,
 // dan ma, them record TXT @.
-function openGscModal() {
+function openGscModal(d) {
   const sel = document.getElementById('gscDomain');
-  sel.innerHTML = (STATE.config.domains || []).map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  sel.innerHTML = (STATE.config.domains || []).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  if (d) sel.value = d;
   document.getElementById('gscModal').classList.add('open');
   loadGscCurrent();
 }
