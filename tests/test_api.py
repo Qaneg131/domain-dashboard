@@ -24,7 +24,7 @@ STATE = {
     "zones": {},      # name -> {id, name, status, name_servers}
     "records": {},    # zone_id -> [rec]
     "nc_ns": {},      # domain -> [ns...]
-    "nc_calls": 0,    # so lan goi Namecheap getList (de test bo qua NC)
+    "nc_calls": 0,    # so lan goi Namecheap API (getList + setCustom)
     "nc_rate_limit": {},  # domain -> so lan con lai tra "Too many requests"
     "email": {},      # zone_id -> {enabled, status, rules:[], addresses:[]}
     "settings": {},   # zone_id -> {ssl, always_use_https, automatic_https_rewrites}
@@ -166,6 +166,7 @@ class MockHandler(BaseHTTPRequestHandler):
                        f'<DomainDNSGetListResult Domain="{dom}" IsUsingOurDNS="false">'
                        f"{items}</DomainDNSGetListResult></CommandResponse></ApiResponse>")
             elif cmd == "namecheap.domains.dns.setCustom":
+                STATE["nc_calls"] += 1
                 ns = q.get("Nameservers", [""])[0].split(",")
                 STATE["nc_ns"][dom] = [n.strip().lower() for n in ns if n.strip()]
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
@@ -908,6 +909,38 @@ def main():
     dash._check_dns_light(["lightdns.com"], cfg6, st36)
     assert st36["lightdns.com"]["light"] and st36["lightdns.com"]["ns_ok"] \
         and not st36["lightdns.com"]["error"], st36
+    print("  OK", flush=True)
+
+    print("TEST 37: _sync_ns — DoH xac nhan thi chi 1 call NC (setCustom)...", flush=True)
+    z20, _c = cf.get_or_create_zone("syncns.com")
+    STATE["nc_ns"]["syncns.com"] = ["dns1.registrar-servers.com",
+                                    "dns2.registrar-servers.com"]  # DoH chua tro dung
+    STATE["nc_calls"] = 0
+    steps37, ok37 = dash._sync_ns("syncns.com", [NS1, NS2], cfg6)
+    assert ok37, steps37
+    assert STATE["nc_calls"] == 1, STATE["nc_calls"]  # chi setCustom, khong getList
+    assert [s["step"] for s in steps37] == ["Doi NS o Namecheap", "DNS lan truyen"], steps37
+    assert all(s["ok"] for s in steps37), steps37
+    # Lan truyen cham (DoH khong xac nhan) -> goi getList xac minh registrar.
+    import time as _time
+    orig_doh = dash._doh
+    orig_sleep = _time.sleep
+    dash._doh = lambda d: ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    _time.sleep = lambda s: None
+    try:
+        STATE["nc_ns"]["syncns2.com"] = ["dns1.registrar-servers.com",
+                                         "dns2.registrar-servers.com"]
+        z21, _c = cf.get_or_create_zone("syncns2.com")
+        STATE["nc_calls"] = 0
+        steps37b, ok37b = dash._sync_ns("syncns2.com", [NS1, NS2], cfg6)
+        assert ok37b, steps37b
+        assert STATE["nc_calls"] == 2, STATE["nc_calls"]  # setCustom + getList
+        by_step = {s["step"]: s for s in steps37b}
+        assert by_step["Doi NS o Namecheap"]["ok"], steps37b
+        assert not by_step["DNS lan truyen"]["ok"], steps37b
+    finally:
+        dash._doh = orig_doh
+        _time.sleep = orig_sleep
     print("  OK", flush=True)
 
     srv.shutdown()

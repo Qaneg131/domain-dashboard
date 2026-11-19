@@ -177,11 +177,11 @@ def _sync_ns(domain, ns, cfg):
         return steps, False
     try:
         _nc_client(cfg).set_nameservers(domain, ns)
-        reg = _nc_client(cfg).get_nameservers(domain)
-        if set(reg) != set(ns):
-            step("Doi NS o Namecheap", False, f"registrar tra ve khac: {', '.join(reg)}")
-            return steps, False
-        step("Doi NS o Namecheap", True, f"registrar da ghi: {', '.join(reg)}")
+        # DoH poll: neu DNS cong da thay NS moi thi chac chan registrar
+        # da ghi dung — khoi goi getList xac minh them (tiet kiem 1 call
+        # Namecheap moi domain, de setup loat 5-10 domain khong dinh
+        # "Too many requests"). Chi goi getList khi DoH chua xac nhan
+        # (lan truyen cham) de biet phia registrar da ghi chua.
         propagated = False
         for _ in range(6):
             time.sleep(5)
@@ -191,9 +191,18 @@ def _sync_ns(domain, ns, cfg):
                     break
             except Exception:
                 pass
-        step("DNS lan truyen", propagated,
-             "NS moi da thay tren DNS cong" if propagated
-             else "registrar da doi, DNS cong chua thay (cho them roi bam Kiem tra)")
+        if propagated:
+            step("Doi NS o Namecheap", True,
+                 f"DNS cong da tro dung NS moi: {', '.join(ns)}")
+            step("DNS lan truyen", True, "NS moi da thay tren DNS cong")
+            return steps, True
+        reg = _nc_client(cfg).get_nameservers(domain)
+        if set(reg) != set(ns):
+            step("Doi NS o Namecheap", False, f"registrar tra ve khac: {', '.join(reg)}")
+            return steps, False
+        step("Doi NS o Namecheap", True, f"registrar da ghi: {', '.join(reg)}")
+        step("DNS lan truyen", False,
+             "registrar da doi, DNS cong chua thay (cho them roi bam Kiem tra)")
         # Registrar da ghi dung la coi nhu dong bo xong (phia minh); lan
         # truyen chi la doi — van cho chay tiep records, buoc lan truyen
         # tu ghi ok/failed de biet.
@@ -859,22 +868,25 @@ class Handler(BaseHTTPRequestHandler):
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 res = setup_domain(d, preset, cfg)
-                _save_check_result(st, d, check_domain(d, cfg))
+                _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json(res)
             elif path == "/api/setup-all":
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 results = []
                 rate_limited = False
-                for d in cfg["domains"]:
+                for i, d in enumerate(cfg["domains"]):
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     if _setup_hit_rate_limit(res):
                         # Namecheap dang gioi han toc do — dung loat, khong
                         # de cac domain sau cung loi theo.
                         rate_limited = True
                         break
+                    if i < len(cfg["domains"]) - 1:
+                        # Nghi giua cac domain de Namecheap API khong bi don.
+                        time.sleep(5)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results,
                             "rate_limited": rate_limited})
@@ -894,17 +906,21 @@ class Handler(BaseHTTPRequestHandler):
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 results = []
                 rate_limited = False
-                for d in domains:
+                for i, d in enumerate(domains):
                     if d not in cfg["domains"]:
                         cfg["domains"].append(d)
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     if _setup_hit_rate_limit(res):
                         # Namecheap dang gioi han toc do — dung loat, khong
                         # de cac domain sau cung loi theo.
                         rate_limited = True
                         break
+                    if i < len(domains) - 1:
+                        # Nghi giua cac domain de Namecheap API khong bi don
+                        # (setup loat 5-10 domain khong dinh "Too many requests").
+                        time.sleep(5)
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results,
@@ -923,7 +939,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 res = apply_preset(d, preset, cfg)
-                _save_check_result(st, d, check_domain(d, cfg))
+                _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json(res)
             elif path == "/api/domain-detail":
@@ -953,7 +969,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Ma xac minh nhap tay (lay tu Search Console).
                 d = str(body.get("domain", "")).strip().lower()
                 ok, detail = set_gsc_record(d, body.get("value", ""), cfg)
-                _save_check_result(st, d, check_domain(d, cfg))
+                _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "detail": detail})
             elif path == "/api/setup-email":
@@ -968,7 +984,7 @@ class Handler(BaseHTTPRequestHandler):
                         {"step": "Tim zone", "ok": False, "detail": err}]})
                     return
                 steps, ok = _apply_email_preset(d, cfg, cf, zone)
-                _save_check_result(st, d, check_domain(d, cfg))
+                _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "steps": steps})
             elif path == "/api/setup-email-batch":
@@ -985,7 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
                 for d in domains:
                     r = _setup_email_one(d, cfg)
                     results.append(r)
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     if any("429" in str(s.get("detail", ""))
                            for s in r.get("steps", [])):
                         results.append({"domain": "(con lai)", "ok": False,
@@ -1006,7 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 ns = [x.lower() for x in zone.get("name_servers", [])]
                 steps, ok = _sync_ns(d, ns, cfg)
-                _save_check_result(st, d, check_domain(d, cfg))
+                _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "steps": steps})
             elif path == "/api/set-records":
@@ -1036,7 +1052,7 @@ class Handler(BaseHTTPRequestHandler):
                                          expand_name(d, r.get("name", "")),
                                          ct, bool(r.get("proxied", True)))
                         added += 1
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "steps": [
                         {"step": "Luu records", "ok": True,
@@ -1059,7 +1075,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         cf.disable_email_routing(zone["id"])
                         msg = "da tat Email Routing"
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "message": msg})
                 except Exception as e:
@@ -1122,7 +1138,7 @@ class Handler(BaseHTTPRequestHandler):
                                        always_https=body.get("always_https"),
                                        rewrites=body.get("rewrites"),
                                        min_tls=body.get("min_tls_version"))
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "https": out})
                 except Exception as e:
@@ -1147,7 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
                                            always_https=hp.get("always_https"),
                                            rewrites=hp.get("rewrites"),
                                            min_tls=hp.get("min_tls_version"))
-                        _save_check_result(st, d, check_domain(d, cfg))
+                        _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                         results.append({"domain": d, "ok": True, "https": out})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
@@ -1172,7 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     try:
                         detail, okb = _sync_records(d, recs, cf, zone)
-                        _save_check_result(st, d, check_domain(d, cfg))
+                        _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                         results.append({"domain": d, "ok": okb, "detail": detail})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
@@ -1194,7 +1210,7 @@ class Handler(BaseHTTPRequestHandler):
                         r = cf.remove_cache_bypass(zone["id"])
                         msg = ("da go rule By Pass" if r.get("removed")
                                else "khong co rule By Pass de go")
-                    _save_check_result(st, d, check_domain(d, cfg))
+                    _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "message": msg})
                 except Exception as e:
@@ -1217,7 +1233,7 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             r = cf.remove_cache_bypass(zone["id"])
                             detail = "da go rule" if r.get("removed") else "khong co rule"
-                        _save_check_result(st, d, check_domain(d, cfg))
+                        _save_check_result(st, d, check_domain(d, cfg, skip_nc=True))
                         results.append({"domain": d, "ok": True, "detail": detail})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
