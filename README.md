@@ -83,7 +83,31 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   như trên Cloudflare, badge Yes/No các cột luôn cùng 1 hàng, thông tin
   phụ (NS, số record, số rule, SSL/TLS…) xuống hàng dưới. Mỗi dòng có
   nút **GSC** riêng — bấm là mở popup Google Search Console đúng domain
-  đó để dán mã xác minh. Trang hiển thị full width.
+  đó để dán mã xác minh. Trang hiển thị full width. Tên domain xếp
+  **A–Z mặc định** (bấm tiêu đề Name để đổi Z–A); mỗi cột DNS / Record /
+  Email routing / HTTPS / Cache có **bộ lọc riêng** (dropdown dưới tiêu
+  đề cột) — lọc theo Đã set / Khớp preset / Enabled / Yes / By Pass,
+  Chưa set, hoặc Chưa kiểm tra. Domain chưa kiểm tra chi tiết vẫn hiện
+  DNS (zone active/pending + NS) lấy từ danh sách tài khoản nên thấy
+  ngay khi mở trang.
+- **Kiểm tra tất cả (theo loat 30 cái)** — nút này không quet 1 lần
+  410 domain nữa (Cloudflare giới hạn ~1200 request/5 phút nên quet
+  1 lần là dính 429). Nó kiểm tra **30 domain/lần, xong loat thì tự
+  động tiếp loat sau** (nghỉ 5s giữa các loat), có thanh tiến độ và nút
+  **Dừng**. Dính 429 thì dừng ngay, đợi ~5 phút rồi bấm lại để **tiếp
+  tục từ chỗ dừng** (không kiểm tra lại từ đầu). Domain nào cần gấp thì
+  tự kiểm tra ưu tiên: tick ô vuông rồi bấm "Kiểm tra đã chọn" (bảng
+  quản lý) hoặc "Kiểm tra trang này" (tab mail). Mỗi lần kiểm tra 1
+  domain giờ chỉ còn ~5 call Cloudflare (HTTPS đọc 1 lần qua endpoint
+  /settings bulk thay vì 4 lần; Namecheap chỉ gọi khi DoH chưa xác
+  nhận NS) nên ít dính 429 hơn.
+- **Tab Setup email** — hiện hết domain đang quản lý (không chỉ
+  active), mỗi dòng có cột **DNS** (zone active/pending + NS, lấy từ
+  danh sách tài khoản nên thấy ngay), Routing status, DNS records
+  (Locked/Unlocked) và nút Setup email (zone pending thì khóa nút).
+  Phân trang **10 domain/trang**, tick checkbox để chọn nhiều domain
+  rồi bấm **"Setup email đã chọn"** setup 1 lần. Không còn nút Setup
+  email tất cả.
 - **Thêm từ tab "Tất cả trong tài khoản"** — bấm "Thêm" xong tool tự kiểm
   tra trạng thái domain đó ngay, khỏi bấm "Kiểm tra tất cả".
   → **xóa hết record cũ** rồi áp preset record → bật Email Routing + tạo

@@ -24,6 +24,7 @@ STATE = {
     "zones": {},      # name -> {id, name, status, name_servers}
     "records": {},    # zone_id -> [rec]
     "nc_ns": {},      # domain -> [ns...]
+    "nc_calls": 0,    # so lan goi Namecheap getList (de test bo qua NC)
     "email": {},      # zone_id -> {enabled, status, rules:[], addresses:[]}
     "settings": {},   # zone_id -> {ssl, always_use_https, automatic_https_rewrites}
     "rulesets": {},   # zone_id -> {id, phase, rules:[]} hoac chua co
@@ -102,6 +103,12 @@ class MockHandler(BaseHTTPRequestHandler):
                     else:
                         self._json(self._cf_ok(ca))
                     return
+            if len(parts) == 5 and parts[4] == "settings":
+                # Bulk: GET /zones/<id>/settings tra het setting 1 lan.
+                stt = STATE["settings"][zid]
+                self._json(self._cf_ok([{"id": k, "value": v, "editable": True}
+                                        for k, v in stt.items()]))
+                return
             if len(parts) == 6 and parts[4] == "settings":
                 name = parts[5]
                 self._json(self._cf_ok({"id": name, "value": STATE["settings"][zid].get(name),
@@ -139,6 +146,7 @@ class MockHandler(BaseHTTPRequestHandler):
                        f'</Errors><Warnings /><RequestedCommand />'
                        f'<Server>Server 1</Server></ApiResponse>')
             elif cmd == "namecheap.domains.dns.getList":
+                STATE["nc_calls"] += 1
                 ns = STATE["nc_ns"].get(dom, ["dns1.registrar-servers.com",
                                                "dns2.registrar-servers.com"])
                 items = "".join(f"<Nameserver>{n}</Nameserver>" for n in ns)
@@ -730,6 +738,32 @@ def main():
     res28b = dash.apply_preset("merge.com", "web", cfg6)
     assert res28b["ok"] and "da xoa 0 record trung" in res28b["steps"][0]["detail"], res28b
     assert len(cf.list_records(z12["id"])) == 9
+    print("  OK", flush=True)
+
+    print("TEST 29: get_https doc 1 lan qua /settings bulk...", flush=True)
+    cf.set_https(z12["id"], ssl="full", always_https="on",
+                 rewrites="on", min_tls="1.2")
+    h29 = cf.get_https(z12["id"])
+    assert h29 == {"ssl": "full", "always_https": "on", "rewrites": "on",
+                   "min_tls": "1.2", "ok": True}, h29
+    print("  OK", flush=True)
+
+    print("TEST 30: check_domain bo qua Namecheap khi DoH da xac nhan NS...", flush=True)
+    z13, _c = cf.get_or_create_zone("ncskip.com")
+    STATE["nc_ns"]["ncskip.com"] = [NS1, NS2]  # DoH tra dung NS zone
+    STATE["nc_calls"] = 0
+    st30 = dash.check_domain("ncskip.com", cfg6)
+    assert st30["ns_ok"], st30
+    assert st30["registrar_ns"] == [NS1, NS2], st30
+    assert STATE["nc_calls"] == 0, STATE["nc_calls"]
+    # DoH chua tro dung -> van goi NC de biet registrar dang ghi gi.
+    z14, _c = cf.get_or_create_zone("ncneed.com")
+    STATE["nc_calls"] = 0
+    st30b = dash.check_domain("ncneed.com", cfg6)
+    assert not st30b["ns_ok"], st30b
+    assert STATE["nc_calls"] == 1, STATE["nc_calls"]
+    assert st30b["registrar_ns"] == ["dns1.registrar-servers.com",
+                                     "dns2.registrar-servers.com"], st30b
     print("  OK", flush=True)
 
     srv.shutdown()

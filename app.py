@@ -98,14 +98,20 @@ def check_domain(domain, cfg):
             st["doh_ns"] = _doh(domain)
         except Exception as e:
             st["error"] = f"DoH lookup loi: {e}"
-        if _nc_configured(cfg):
-            try:
-                st["registrar_ns"] = _nc_client(cfg).get_nameservers(domain)
-            except Exception as e:
-                st["registrar_ns_error"] = str(e)
         if st["zone"] and st["doh_ns"]:
             want = {x.lower() for x in st["zone"]["name_servers"]}
             st["ns_ok"] = bool(want) and set(st["doh_ns"]) == want
+        if _nc_configured(cfg):
+            if st["ns_ok"]:
+                # DNS cong da tro dung NS Cloudflare thi chac chan
+                # registrar cung da ghi dung — khoi goi Namecheap API
+                # (kiem tra loat rat de dinh gioi han toc do ben NC).
+                st["registrar_ns"] = list(st["doh_ns"])
+            else:
+                try:
+                    st["registrar_ns"] = _nc_client(cfg).get_nameservers(domain)
+                except Exception as e:
+                    st["registrar_ns_error"] = str(e)
         if st["zone"]:
             try:
                 st["records"] = [{"id": r.get("id"), "type": r.get("type"),
@@ -573,6 +579,34 @@ def apply_preset(domain, preset_name, cfg):
             {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": str(e)}]}
 
 
+def _is_rate_limited(st):
+    """Trang thai check co dinh gioi han toc do khong — 429 cua
+    Cloudflare o bat ky buoc nao, hoac Namecheap bao throttling."""
+    texts = [str(st.get("error", ""))]
+    for k in ("email", "https"):
+        v = st.get(k) or {}
+        texts.append(str(v.get("error", "")))
+    texts.append(str(st.get("registrar_ns_error", "")))
+    joined = " ".join(texts)
+    return "429" in joined or "throttl" in joined.lower()
+
+
+def _check_many(domains, cfg, st):
+    """Kiem tra nhieu domain: nghi 0.3s giua cac domain de bot dot
+    API, DUNG NGAY khi gap gioi han toc do (429/throttling) de khong
+    dot tiep. Tra ve (so domain da check, co bi gioi han khong)."""
+    checked = 0
+    limited = False
+    for d in domains:
+        st[d] = check_domain(d, cfg)
+        checked += 1
+        if _is_rate_limited(st[d]):
+            limited = True
+            break
+        time.sleep(0.3)
+    return checked, limited
+
+
 # ------------------------------------------------------------------- server
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
@@ -686,22 +720,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "domains": cfg["domains"]})
             elif path == "/api/check":
                 if body.get("all"):
-                    for d in cfg["domains"]:
-                        st[d] = check_domain(d, cfg)
+                    checked, limited = _check_many(cfg["domains"], cfg, st)
                     save_status(st)
-                    self._json({"ok": True, "status": st})
+                    self._json({"ok": True, "status": st,
+                                "checked": checked,
+                                "total": len(cfg["domains"]),
+                                "rate_limited": limited})
                 elif body.get("domains"):
-                    # Kiem tra 1 loat domain (trang hien tai cua bang) —
-                    # mo trang nao tu kiem tra 5 domain trang do.
-                    out = {}
-                    for dd in body["domains"]:
-                        dd = str(dd).strip().lower()
-                        if not dd:
-                            continue
-                        st[dd] = check_domain(dd, cfg)
-                        out[dd] = st[dd]
+                    # Kiem tra 1 loat domain (trang hien tai cua bang, hoac
+                    # 1 loat 30 cai cua "Kiem tra tat ca") — chi tra ve
+                    # trang thai cua loat do.
+                    wanted = [str(x).strip().lower() for x in body["domains"]
+                              if str(x).strip()]
+                    checked, limited = _check_many(wanted, cfg, st)
                     save_status(st)
-                    self._json({"ok": True, "status": out})
+                    self._json({"ok": True,
+                                "status": {d: st[d] for d in wanted if d in st},
+                                "checked": checked, "rate_limited": limited})
                 else:
                     d = str(body.get("domain", "")).strip().lower()
                     st[d] = check_domain(d, cfg)

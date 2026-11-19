@@ -160,7 +160,23 @@ class CFClient:
 
     def get_https(self, zone_id):
         """{'ssl', 'always_https', 'rewrites', 'min_tls', 'ok'} —
-        ok = ssl != off va always_https on."""
+        ok = ssl != off va always_https on. Doc 1 lan qua endpoint
+        /settings (tra het setting) de bot 3 call — kiem tra nhieu
+        domain lien tuc rat de dinh 429. That bai (tru 429) thi roi
+        ve doc tung setting nhu cu."""
+        try:
+            payload = self._req("GET", f"/zones/{zone_id}/settings")
+            vals = {s.get("id"): s.get("value")
+                    for s in (self._ok(payload) or [])}
+            ssl = vals.get("ssl", "off")
+            auh = vals.get("always_use_https", "off")
+            rew = vals.get("automatic_https_rewrites", "off")
+            tls = vals.get("min_tls_version", "1.0")
+            return {"ssl": ssl, "always_https": auh, "rewrites": rew,
+                    "min_tls": tls, "ok": ssl != "off" and auh == "on"}
+        except CFError as e:
+            if getattr(e, "status", None) == 429:
+                raise
         ssl = self.get_setting(zone_id, "ssl").get("value", "off")
         auh = self.get_setting(zone_id, "always_use_https").get("value", "off")
         rew = self.get_setting(zone_id, "automatic_https_rewrites").get("value", "off")

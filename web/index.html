@@ -130,7 +130,6 @@
     <div class="row">
       <button id="tabManaged" onclick="showDomainTab('managed')">Danh sách quản lý</button>
       <button class="secondary" id="tabEmail" onclick="showDomainTab('email')">Setup email</button>
-      <button class="secondary" onclick="openGscModal()">Google Search Console</button>
     </div>
     <div id="managedTab">
     <div class="row">
@@ -138,7 +137,8 @@
       <button onclick="addDomain()">Thêm domain</button>
       <input type="text" id="domainSearch" placeholder="Tìm domain…" style="max-width:300px" oninput="MANAGED_PAGE=1;renderTable()">
       <button class="secondary" onclick="checkAll()">Kiểm tra tất cả</button>
-      <button onclick="setupAll()">Setup tất cả (preset mặc định)</button>
+      <button class="secondary small" id="batchStopBtn" style="display:none" onclick="stopBatchCheck()">Dừng</button>
+      <span class="muted" id="batchProgress"></span>
       <span class="muted" id="domainCount"></span>
     </div>
     <div class="row" id="bulkBar">
@@ -156,7 +156,16 @@
       <button class="secondary small" onclick="checkSelected()">Kiểm tra đã chọn</button>
     </div>
     <table>
-      <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr></thead>
+      <thead>
+        <tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th><a href="#" id="nameSortLabel" onclick="toggleNameSort();return false" title="Bấm để đổi A-Z / Z-A">Name ↑</a></th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr>
+        <tr><th></th><th></th>
+          <th><select id="fltDns" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo DNS"><option value="">Tất cả</option><option value="set">Đã set ✓</option><option value="unset">Chưa set</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltRec" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Record"><option value="">Tất cả</option><option value="match">Khớp preset ✓</option><option value="nomatch">Chưa khớp</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltEm" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Email routing"><option value="">Tất cả</option><option value="on">Enabled</option><option value="off">Disabled</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltHttps" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo HTTPS"><option value="">Tất cả</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltCache" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Cache"><option value="">Tất cả</option><option value="bypass">By Pass</option><option value="no">No</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th></th></tr>
+      </thead>
       <tbody id="domainTable"><tr><td colspan="8" class="muted">Đang tải…</td></tr></tbody>
     </table>
     <div class="row" id="pager"></div>
@@ -174,15 +183,17 @@
       <div class="row"><button class="secondary small" onclick="addEmailPresetRow()">+ Thêm rule</button></div>
       <hr>
       <div class="row">
-        <button class="secondary" onclick="checkAll()">Kiểm tra trạng thái</button>
-        <button onclick="setupEmailAllActive()">Setup email tất cả (active)</button>
+        <button class="secondary" onclick="checkEmailPage()">Kiểm tra trang này</button>
+        <button onclick="setupEmailSelected()">Setup email đã chọn</button>
+        <span class="muted" id="emailSelectedCount">Chưa chọn domain nào — tick ô vuông để chọn nhiều domain rồi setup 1 lần.</span>
         <span class="muted" id="emailTabCount"></span>
       </div>
-      <p class="hint">Chỉ hiện domain có zone đã <b>active</b> — zone pending thì Cloudflare không cho bật Email Routing. Bấm "Setup email" để bật Email Routing + áp rule theo email preset.</p>
+      <p class="hint">Cột DNS (zone active/pending + nameserver) lấy từ danh sách tài khoản nên thấy ngay khi mở tab. Routing status chỉ có sau khi kiểm tra — mở trang nào tự kiểm tra 10 domain trang đó. Zone pending thì Cloudflare không cho bật Email Routing (nút Setup bị khóa).</p>
       <table>
-        <thead><tr><th>Name</th><th>Zone</th><th>Routing status</th><th>DNS records</th><th></th></tr></thead>
-        <tbody id="emailTable"><tr><td colspan="5" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr></tbody>
+        <thead><tr><th><input type="checkbox" id="emailCheckAll" onchange="toggleEmailCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Routing status</th><th>DNS records</th><th></th></tr></thead>
+        <tbody id="emailTable"><tr><td colspan="6" class="muted">Đang tải…</td></tr></tbody>
       </table>
+      <div class="row" id="emailPager"></div>
     </div>
   </div>
 
@@ -535,44 +546,136 @@ function showDomainTab(which) {
   document.getElementById('tabEmail').className = which === 'email' ? '' : 'secondary';
   if (which === 'email') {
     renderEmailTab();
-    // Chua co trang thai thi tu kiem tra luon de biet domain nao active.
-    if (!(STATE.status && Object.keys(STATE.status).length)) checkAll();
+    // Khong quet het nua — mo trang nao tu kiem tra 10 domain trang do.
   }
 }
 // ---------------------------------------------------------------- tab Setup email
-// Chi hien domain co zone active — zone pending thi Cloudflare khong cho
 // bat Email Routing nen khong cho set o day.
+const EMAIL_PAGE_SIZE = 10;
+let EMAIL_PAGE = 1;
 function renderEmailTab() {
   const tb = document.getElementById('emailTable');
-  const domains = STATE.config.domains || [];
-  const checked = domains.filter(d => STATE.status && STATE.status[d]);
-  const active = checked.filter(d => STATE.status[d].zone && STATE.status[d].zone.status === 'active');
-  const pending = checked.length - active.length;
+  // Danh sach: domain dang quan ly; DNS (zone active/pending + NS) lay
+  // tu danh sach tai khoan nen thay ngay, khong can kiem tra tung domain.
+  const managed = STATE.config.domains || [];
+  const zoneByName = {};
+  (ACCOUNT_ZONES || []).forEach(z => zoneByName[z.name] = z);
+  const all = managed.map(d => zoneByName[d] || { name: d, status: null, name_servers: [] });
+  // Active len truoc, pending xuong duoi, chua ro cuoi.
+  const rank = z => z.status === 'active' ? 0 : z.status ? 1 : 2;
+  all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const totalPages = Math.max(1, Math.ceil(all.length / EMAIL_PAGE_SIZE));
+  if (EMAIL_PAGE > totalPages) EMAIL_PAGE = totalPages;
+  if (EMAIL_PAGE < 1) EMAIL_PAGE = 1;
+  const pageRows = all.slice((EMAIL_PAGE - 1) * EMAIL_PAGE_SIZE, EMAIL_PAGE * EMAIL_PAGE_SIZE);
+  const activeCount = all.filter(z => z.status === 'active').length;
   document.getElementById('emailTabCount').textContent =
-    `${active.length} domain active / ${domains.length} domain quản lý` +
-    (pending ? ` (${pending} domain chưa active nên không hiện ở đây)` : '');
-  if (!checked.length) {
-    tb.innerHTML = '<tr><td colspan="5" class="muted">Chưa có trạng thái — bấm "Kiểm tra trạng thái".</td></tr>';
+    `${activeCount} active / ${all.length} domain quản lý`;
+  if (!pageRows.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="muted">Chưa có domain nào.</td></tr>';
+    renderEmailPager(totalPages, all.length);
     return;
   }
-  if (!active.length) {
-    tb.innerHTML = '<tr><td colspan="5" class="muted">Chưa có domain nào active — đợi Cloudflare kích hoạt zone rồi bấm "Kiểm tra trạng thái" lại.</td></tr>';
-    return;
-  }
-  tb.innerHTML = active.map(d => {
-    const s = STATE.status[d];
+  tb.innerHTML = pageRows.map(z => {
+    const d = z.name;
+    const s = STATE.status[d] || {};
     const em = s.email || {};
-    const routing = em.error ? `<span class="badge no">No</span> <span class="muted">lỗi</span>`
-      : em.enabled ? `<span class="badge ok">● Enabled</span> ${em.rules || 0} rule`
+    const active = z.status === 'active';
+    const dnsBadge = active ? '<span class="badge ok">active</span>'
+      : z.status ? `<span class="badge wait">${esc(z.status)}</span>`
+      : '<span class="muted">chưa rõ</span>';
+    const nsLines = (z.name_servers && z.name_servers.length) ? z.name_servers
+      : (s.doh_ns || []);
+    const dnsCell = dnsBadge + (nsLines.length
+      ? `<br><span class="mono">${nsLines.map(esc).join('<br>')}</span>` : '')
+      + `<br><span class="muted">zone: ${z.status || 'chưa rõ'}</span>`;
+    const routing = !s.zone ? '<span class="muted">chưa kiểm tra</span>'
+      : em.error ? '<span class="badge no">No</span><br><span class="muted">lỗi</span>'
+      : em.enabled ? `<span class="badge ok">● Enabled</span><br><span class="muted">${em.rules || 0} rule</span>`
       : '<span class="badge no">Disabled</span>';
-    const dnsLock = em.dns_locked ? '<span class="badge ok">● Locked</span>'
-      : '<span class="muted">Unlocked</span>';
-    return `<tr><td><b>${esc(d)}</b></td>
-      <td><span class="badge ok">active</span></td>
+    const dnsLock = !s.zone ? '<span class="muted">—</span>'
+      : em.dns_locked ? '<span class="badge ok">● Locked</span>' : '<span class="muted">Unlocked</span>';
+    const btn = active
+      ? `<button class="small" onclick="setupEmailOne('${esc(d)}')">Setup email</button>`
+      : '<span class="muted">đợi active</span>';
+    return `<tr>
+      <td><input type="checkbox" class="email-check" value="${esc(d)}" ${active ? '' : 'disabled'} onchange="updateEmailSelectedCount()"></td>
+      <td><b>${esc(d)}</b></td>
+      <td>${dnsCell}</td>
       <td>${routing}</td>
       <td>${dnsLock}</td>
-      <td><button class="small" onclick="setupEmailOne('${esc(d)}')">Setup email</button></td></tr>`;
+      <td style="white-space:nowrap">${btn}</td></tr>`;
   }).join('');
+  renderEmailPager(totalPages, all.length);
+  document.getElementById('emailCheckAll').checked = false;
+  updateEmailSelectedCount();
+  autoCheckEmailPage(pageRows.map(z => z.name));
+}
+function renderEmailPager(totalPages, total) {
+  const el = document.getElementById('emailPager');
+  const nums = [];
+  const start = Math.max(1, EMAIL_PAGE - 2), end = Math.min(totalPages, EMAIL_PAGE + 2);
+  for (let p = start; p <= end; p++)
+    nums.push(p === EMAIL_PAGE ? `<b>${p}</b>` : `<a href="#" onclick="gotoEmailPage(${p});return false">${p}</a>`);
+  el.innerHTML = `<span class="muted">Trang ${EMAIL_PAGE}/${totalPages} — ${total} domain</span>`
+    + (EMAIL_PAGE > 1 ? ` <a href="#" onclick="gotoEmailPage(${EMAIL_PAGE - 1});return false">Trước</a>` : '')
+    + ' ' + nums.join(' ')
+    + (EMAIL_PAGE < totalPages ? ` <a href="#" onclick="gotoEmailPage(${EMAIL_PAGE + 1});return false">Sau</a>` : '');
+}
+function gotoEmailPage(p) { EMAIL_PAGE = p; renderEmailTab(); }
+function selectedEmailDomains() {
+  return [...document.querySelectorAll('.email-check:checked')].map(c => c.value);
+}
+function updateEmailSelectedCount() {
+  const n = selectedEmailDomains().length;
+  document.getElementById('emailSelectedCount').textContent = n
+    ? `Đã chọn ${n} domain — bấm "Setup email đã chọn" để setup 1 lần.`
+    : 'Chưa chọn domain nào — tick ô vuông để chọn nhiều domain rồi setup 1 lần.';
+}
+function toggleEmailCheckAll(on) {
+  document.querySelectorAll('.email-check:not(:disabled)').forEach(c => c.checked = on);
+  updateEmailSelectedCount();
+}
+async function checkEmailPage() {
+  // Chi kiem tra 10 domain trang hien tai (khong quet het — de tranh 429).
+  const page = [...document.querySelectorAll('.email-check')].map(c => c.value);
+  if (!page.length) { alert('Trang này không có domain nào.'); return; }
+  log(`Đang kiểm tra ${page.length} domain trang hiện tại…`);
+  const res = await api('/api/check', { domains: page });
+  STATE.status = { ...STATE.status, ...res.status };
+  renderEmailTab();
+  if (res.rate_limited) {
+    RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
+    log('Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đợi ~5 phút rồi kiểm tra lại.');
+  }
+}
+async function setupEmailSelected() {
+  const domains = selectedEmailDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào — tick ô vuông ở cột đầu để chọn.'); return; }
+  if (!confirm(`Setup email cho ${domains.length} domain đã chọn?`)) return;
+  log(`Đang setup email cho ${domains.length} domain…`);
+  const results = [];
+  for (const d of domains) results.push(await api('/api/setup-email', { domain: d }));
+  log(results.map(fmtSteps).join('\n\n'));
+  showDiagnosis(results);
+  await refresh();
+}
+let EMAIL_CHECKING = new Set();
+async function autoCheckEmailPage(domains) {
+  // Mo trang nao tu kiem tra 10 domain trang do (chi domain chua co
+  // trang thai). Dang chay loat lon thi thoi — loat se quet toi no.
+  if (BATCH_CHECK.running || rateLimited()) return;
+  const missing = domains.filter(d => !(STATE.status && STATE.status[d]) && !EMAIL_CHECKING.has(d));
+  if (!missing.length) return;
+  missing.forEach(d => EMAIL_CHECKING.add(d));
+  const res = await api('/api/check', { domains: missing });
+  missing.forEach(d => EMAIL_CHECKING.delete(d));
+  STATE.status = { ...STATE.status, ...res.status };
+  if (res.rate_limited) {
+    RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
+    log('Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đợi ~5 phút rồi kiểm tra lại.');
+  }
+  renderEmailTab();
 }
 async function setupEmailOne(d) {
   if (!confirm(`Setup email cho ${d}?\n- Bật Email Routing (nếu chưa)\n- Áp rule theo email preset`)) return;
@@ -580,18 +683,6 @@ async function setupEmailOne(d) {
   const res = await api('/api/setup-email', { domain: d });
   log(fmtSteps(res));
   showDiagnosis([res]);
-  await refresh();
-}
-async function setupEmailAllActive() {
-  const domains = (STATE.config.domains || []).filter(d =>
-    STATE.status[d] && STATE.status[d].zone && STATE.status[d].zone.status === 'active');
-  if (!domains.length) { alert('Chưa có domain nào active.'); return; }
-  if (!confirm(`Setup email cho ${domains.length} domain active?`)) return;
-  log(`Đang setup email cho ${domains.length} domain…`);
-  const results = [];
-  for (const d of domains) results.push(await api('/api/setup-email', { domain: d }));
-  log(results.map(fmtSteps).join('\n\n'));
-  showDiagnosis(results);
   await refresh();
 }
 async function loadAccountZones(quiet) {
@@ -633,12 +724,20 @@ const PAGE_SIZE = 5;
 let MANAGED_PAGE = 1;
 const AUTO_CHECKING = new Set();
 async function autoCheckVisible(names) {
+  // Mo trang nao tu kiem tra 5 domain trang do (chi domain chua co
+  // trang thai). Dang chay loat lon hoac dang cho 429 thi thoi — loat
+  // se quet toi no.
+  if (BATCH_CHECK.running || rateLimited()) return;
   const need = names.filter(d => !STATE.status[d] && !AUTO_CHECKING.has(d));
   if (!need.length) return;
   need.forEach(d => AUTO_CHECKING.add(d));
   try {
     const res = await api('/api/check', { domains: need });
     STATE.status = { ...STATE.status, ...res.status };
+    if (res.rate_limited) {
+      RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
+      log('Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đợi ~5 phút rồi kiểm tra lại.');
+    }
     renderTable();
   } finally {
     need.forEach(d => AUTO_CHECKING.delete(d));
@@ -647,9 +746,15 @@ async function autoCheckVisible(names) {
 function managedRow(d) {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
-    const dnsCell = s.error && !zone ? `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`
-      : yesNo(s.ns_ok) + `<br><span class="mono">${(s.doh_ns || []).map(esc).join('<br>') || ''}</span>`
-        + (zone ? `<br><span class="muted">zone: ${esc(zone.status)}</span>` : '');
+    // Domain chua kiem tra chi tiet: van hien DNS tu danh sach tai khoan
+    // (zone active/pending + NS) — lay 1 lan cho het zone nen thay ngay.
+    const zi = zone ? null : (ACCOUNT_ZONES || []).find(z => z.name === d);
+    let dnsCell;
+    if (s.error && !zone) dnsCell = `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`;
+    else if (zone) dnsCell = yesNo(s.ns_ok) + `<br><span class="mono">${(s.doh_ns || []).map(esc).join('<br>') || ''}</span>`
+        + `<br><span class="muted">zone: ${esc(zone.status)}</span>`;
+    else if (zi) dnsCell = `<span class="badge ${zi.status === 'active' ? 'ok' : 'wait'}">${esc(zi.status)}</span><br><span class="mono">${(zi.name_servers || []).map(esc).join('<br>')}</span><br><span class="muted">chưa kiểm tra chi tiết</span>`;
+    else dnsCell = '<span class="muted">—</span>';
     const recs = s.records || [];
     const recCell = !zone ? '<span class="muted">—</span>'
       : recs.length === 0 ? '<span class="badge no">No</span><br><span class="muted">0 record</span>'
@@ -677,12 +782,55 @@ function managedRow(d) {
         <button class="small warn" onclick="removeDomain('${esc(d)}')">✕</button>
       </td></tr>`;
 }
+let NAME_SORT = 'az'; // mac dinh A-Z; bam tieu de Name de doi Z-A
+function toggleNameSort() {
+  NAME_SORT = NAME_SORT === 'az' ? 'za' : 'az';
+  renderTable();
+}
+function matchesFilters(d) {
+  // Chua co muc trang thai trong STATE.status = chua kiem tra bao gio.
+  const st = (STATE.status || {})[d];
+  const s = st || {};
+  const zone = s.zone;
+  const flt = id => (document.getElementById(id).value || '');
+  const dns = flt('fltDns');
+  if (dns) {
+    const state = !st ? 'unknown' : s.ns_ok ? 'set' : 'unset';
+    if (state !== dns) return false;
+  }
+  const rec = flt('fltRec');
+  if (rec) {
+    const state = !st || !zone || s.records_ok === null || s.records_ok === undefined ? 'unknown'
+      : s.records_ok ? 'match' : 'nomatch';
+    if (state !== rec) return false;
+  }
+  const em = flt('fltEm');
+  if (em) {
+    const state = !st || !zone || !s.email ? 'unknown' : s.email.enabled ? 'on' : 'off';
+    if (state !== em) return false;
+  }
+  const https = flt('fltHttps');
+  if (https) {
+    const state = !st || !zone || !s.https ? 'unknown' : s.https.ok ? 'yes' : 'no';
+    if (state !== https) return false;
+  }
+  const cache = flt('fltCache');
+  if (cache) {
+    const state = !st || !zone || s.cache_bypass === null || s.cache_bypass === undefined ? 'unknown'
+      : s.cache_bypass ? 'bypass' : 'no';
+    if (state !== cache) return false;
+  }
+  return true;
+}
 function renderTable() {
   const cfg = STATE.config || {};
   const domains = cfg.domains || [];
   const q = (document.getElementById('domainSearch').value || '').toLowerCase();
-  const all = domains.filter(d => !q || d.toLowerCase().includes(q));
-  document.getElementById('domainCount').textContent = `${domains.length} domain`;
+  // Tim kiem + loc tung cot, roi xep ten A-Z (mac dinh).
+  const all = domains.filter(d => (!q || d.toLowerCase().includes(q)) && matchesFilters(d));
+  all.sort((a, b) => NAME_SORT === 'az' ? a.localeCompare(b) : b.localeCompare(a));
+  document.getElementById('nameSortLabel').textContent = NAME_SORT === 'az' ? 'Name ↑' : 'Name ↓';
+  document.getElementById('domainCount').textContent = `${all.length}/${domains.length} domain`;
   const tb = document.getElementById('domainTable');
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   if (MANAGED_PAGE > totalPages) MANAGED_PAGE = totalPages;
@@ -1011,14 +1159,63 @@ async function checkOne(d) {
   const s = res.status[d] || {};
   log(`${d}: NS ${s.ns_ok ? 'ĐÃ SET ✓' : 'chưa set'} | zone: ${s.zone ? s.zone.status : 'chưa có'} | records: ${(s.records || []).length}${s.error ? '\nLỗi: ' + s.error : ''}`);
 }
+const BATCH_SIZE = 30;
+let BATCH_CHECK = { running: false, list: [], index: 0, stopped: false };
+let RATE_LIMIT_UNTIL = 0;
+function rateLimited() { return Date.now() < RATE_LIMIT_UNTIL; }
+function setBatchProgress(t) { document.getElementById('batchProgress').textContent = t; }
+function stopBatchCheck() {
+  BATCH_CHECK.stopped = true;
+  log('Đã bấm dừng — sẽ dừng sau loat hiện tại.');
+}
 async function checkAll() {
-  log('Đang kiểm tra tất cả domain…');
-  const res = await api('/api/check', { all: true });
-  STATE.status = res.status || {};
-  renderTable();
-  renderEmailTab();
-  log(Object.values(STATE.status).map(s =>
-    `${s.domain}: NS ${s.ns_ok ? 'ĐÃ SET ✓' : 'chưa set'} | zone: ${s.zone ? s.zone.status : 'chưa có'} | records: ${(s.records || []).length}${s.error ? ' | lỗi: ' + s.error : ''}`).join('\n'));
+  // Kiem tra TAT CA theo loat 30 cai/lan, xong loat thi tu dong tiep
+  // loat sau (nghi 5s giua cac loat). Dung ngay khi dinh 429 — bam lai
+  // sau vai phut de tiep tuc tu cho dung (khong kiem tra lai tu dau).
+  if (BATCH_CHECK.running) { log('Đang kiểm tra theo loat — đợi chạy xong hoặc bấm Dừng.'); return; }
+  const all = STATE.config.domains || [];
+  if (!all.length) { log('Chưa có domain nào.'); return; }
+  // Cung danh sach nhu lan truoc thi tiep tuc tu cho dung; doi danh
+  // sach thi chay lai tu dau.
+  let index = 0;
+  if (BATCH_CHECK.list.length === all.length &&
+      BATCH_CHECK.list.every((d, i) => d === all[i]) && BATCH_CHECK.index < all.length)
+    index = BATCH_CHECK.index;
+  BATCH_CHECK = { running: true, list: all, index, stopped: false };
+  document.getElementById('batchStopBtn').style.display = '';
+  log(`Bắt đầu kiểm tra ${all.length} domain theo loat ${BATCH_SIZE} cái/lần, tự động tiếp tục…` +
+      (index ? ` (tiếp tục từ ${index + 1}/${all.length})` : ''));
+  while (BATCH_CHECK.index < BATCH_CHECK.list.length) {
+    if (BATCH_CHECK.stopped) break;
+    if (rateLimited()) {
+      log('Đang trong thời gian chờ giới hạn tốc độ (429) — dừng loat, đợi vài phút rồi bấm "Kiểm tra tất cả" lại để tiếp tục.');
+      break;
+    }
+    const batch = BATCH_CHECK.list.slice(BATCH_CHECK.index, BATCH_CHECK.index + BATCH_SIZE);
+    setBatchProgress(`Đang kiểm tra ${BATCH_CHECK.index + 1}–${BATCH_CHECK.index + batch.length}/${BATCH_CHECK.list.length}…`);
+    const res = await api('/api/check', { domains: batch });
+    STATE.status = { ...STATE.status, ...res.status };
+    BATCH_CHECK.index += batch.length;
+    renderTable();
+    renderEmailTab();
+    if (res.rate_limited) {
+      RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
+      log(`Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đã kiểm tra ${BATCH_CHECK.index}/${BATCH_CHECK.list.length} domain. Đợi ~5 phút rồi bấm "Kiểm tra tất cả" lại để tiếp tục từ chỗ dừng.`);
+      break;
+    }
+    if (BATCH_CHECK.index < BATCH_CHECK.list.length)
+      await new Promise(r => setTimeout(r, 5000));
+  }
+  const done = BATCH_CHECK.index >= BATCH_CHECK.list.length;
+  if (done) {
+    BATCH_CHECK.index = 0;
+    setBatchProgress(`Đã kiểm tra xong ${BATCH_CHECK.list.length} domain.`);
+    log(`Đã kiểm tra xong ${BATCH_CHECK.list.length} domain.`);
+  } else {
+    setBatchProgress(`Đã dừng ở ${BATCH_CHECK.index}/${BATCH_CHECK.list.length} — bấm "Kiểm tra tất cả" để tiếp tục.`);
+  }
+  BATCH_CHECK.running = false;
+  document.getElementById('batchStopBtn').style.display = 'none';
 }
 async function setupOne(d) {
   if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset mặc định (${STATE.config.default_preset || 'chưa có'})`)) return;
@@ -1026,14 +1223,6 @@ async function setupOne(d) {
   const res = await api('/api/setup', { domain: d });
   log(fmtSteps(res));
   showDiagnosis([res]);
-  await refresh();
-}
-async function setupAll() {
-  if (!confirm(`Setup TẤT CẢ domain với preset mặc định (${STATE.config.default_preset || 'chưa có'})?`)) return;
-  log('Đang setup tất cả domain… (mỗi domain có thể mất ~1 phút)');
-  const res = await api('/api/setup-all', {});
-  log((res.results || []).map(fmtSteps).join('\n\n'));
-  showDiagnosis(res.results || []);
   await refresh();
 }
 async function applyPreset(d) {
