@@ -154,6 +154,8 @@
       <button class="secondary small" id="batchStopBtn" style="display:none" onclick="stopBatchCheck()">Dừng</button>
       <span class="muted" id="batchProgress"></span>
       <span class="muted" id="domainCount"></span>
+      <span class="muted" id="errorCount" style="color:#c0392b"></span>
+      <button class="secondary small" id="recheckErrorsBtn" style="display:none" onclick="recheckErrors()">Kiểm tra lại domain bị lỗi</button>
     </div>
     <div class="row" id="bulkBar">
       <span class="muted" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
@@ -173,7 +175,7 @@
       <thead>
         <tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th><a href="#" id="nameSortLabel" onclick="toggleNameSort();return false" title="Bấm để đổi A-Z / Z-A">Name ↑</a></th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr>
         <tr><th></th><th></th>
-          <th><select id="fltDns" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo DNS"><option value="">Tất cả</option><option value="set">Đã set ✓</option><option value="unset">Chưa set</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltDns" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo DNS"><option value="">Tất cả</option><option value="set">Đã set ✓</option><option value="unset">Chưa set</option><option value="error">Lỗi</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltRec" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Record"><option value="">Tất cả</option><option value="match">Khớp preset ✓</option><option value="nomatch">Chưa khớp</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltEm" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Email routing"><option value="">Tất cả</option><option value="on">Enabled</option><option value="off">Disabled</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltHttps" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo HTTPS"><option value="">Tất cả</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Chưa kiểm tra</option></select></th>
@@ -241,6 +243,14 @@
     <div id="log">Chưa chạy gì. Bấm "Kiểm tra tất cả" để xem trạng thái, bấm "Setup" ở từng domain để tự động setup.</div>
   </div>
 </main>
+</div>
+
+<div class="modal-bg" id="notifyModal" onclick="if (event.target === this) closeNotify()">
+  <div class="modal" style="max-width:520px">
+    <button class="secondary small close" onclick="closeNotify()">Đóng ✕</button>
+    <h2 id="notifyTitle"></h2>
+    <div id="notifyBody" style="margin-top:8px"></div>
+  </div>
 </div>
 
 <div class="modal-bg" id="editModal" onclick="if (event.target === this) closeEdit()">
@@ -565,6 +575,7 @@ async function setupBatch() {
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
+  notifyResults('Setup danh sách xong', res.results || []);
 }
 async function addBatchToManaged() {
   const domains = batchDomainList();
@@ -573,6 +584,7 @@ async function addBatchToManaged() {
   }
   await refresh();
   log(`Đã thêm ${domains.length} domain vào bảng quản lý.`);
+  notify('Đã thêm domain vào bảng quản lý', `Đã thêm <b>${domains.length}</b> domain:${namesHtml(domains)}`);
 }
 
 // ---------------------------------------------------------------- account tab
@@ -710,6 +722,8 @@ async function checkEmailPage() {
     RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
     log('Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đợi ~5 phút rồi kiểm tra lại.');
   }
+  const errs = page.filter(d => isErrorStatus(STATE.status[d]));
+  notify('Kiểm tra trang này xong', `Đã kiểm tra xong <b>${page.length}</b> domain.` + (errs.length ? `<br>Còn <b>${errs.length}</b> domain bị lỗi: ${namesHtml(errs)}` : '<br>Không còn domain nào bị lỗi.'));
 }
 async function setupEmailSelected() {
   const domains = selectedEmailDomains();
@@ -721,6 +735,7 @@ async function setupEmailSelected() {
   log(results.map(fmtSteps).join('\n\n'));
   showDiagnosis(results);
   await refresh();
+  notifyResults('Setup email đã chọn xong', results);
 }
 function emailBatchDomains() {
   const raw = document.getElementById('emailBatchList').value || '';
@@ -740,6 +755,7 @@ async function setupEmailBatch() {
   log(results.map(r => r.already_set ? `${r.domain}: đã set đủ, bỏ qua` : fmtSteps(r)).join('\n\n'));
   showDiagnosis(results);
   await refresh();
+  notifyResults('Setup email theo danh sách xong', results);
 }
 async function addEmailBatchToManaged() {
   const domains = emailBatchDomains();
@@ -753,6 +769,7 @@ async function addEmailBatchToManaged() {
   }
   log(`Đã thêm ${added}/${domains.length} domain vào bảng quản lý.`);
   await refresh();
+  notify('Đã thêm domain vào bảng quản lý', `Đã thêm <b>${added}/${domains.length}</b> domain:${namesHtml(domains)}`);
 }
 let EMAIL_CHECKING = new Set();
 async function autoCheckEmailPage(domains) {
@@ -779,6 +796,10 @@ async function setupEmailOne(d) {
   log(fmtSteps(res));
   showDiagnosis([res]);
   await refresh();
+  notify(res.ok ? `Setup email xong ${d}` : `Setup email ${d} chưa xong`,
+    res.ok ? (res.already_set ? `Domain <b>${esc(d)}</b> đã set email đủ từ trước nên bỏ qua.`
+                              : `Domain <b>${esc(d)}</b> đã setup email xong (Email Routing + rule theo preset).`)
+           : `Domain <b>${esc(d)}</b> chưa setup email xong — xem log bên dưới để biết bước nào lỗi.`);
 }
 async function loadAccountZones(quiet) {
   const res = await api('/api/account-zones');
@@ -890,7 +911,7 @@ function matchesFilters(d) {
   const flt = id => (document.getElementById(id).value || '');
   const dns = flt('fltDns');
   if (dns) {
-    const state = !st ? 'unknown' : s.ns_ok ? 'set' : 'unset';
+    const state = !st ? 'unknown' : s.error ? 'error' : s.ns_ok ? 'set' : 'unset';
     if (state !== dns) return false;
   }
   const rec = flt('fltRec');
@@ -926,6 +947,7 @@ function renderTable() {
   all.sort((a, b) => NAME_SORT === 'az' ? a.localeCompare(b) : b.localeCompare(a));
   document.getElementById('nameSortLabel').textContent = NAME_SORT === 'az' ? 'Name ↑' : 'Name ↓';
   document.getElementById('domainCount').textContent = `${all.length}/${domains.length} domain`;
+  renderErrorCount();
   const tb = document.getElementById('domainTable');
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   if (MANAGED_PAGE > totalPages) MANAGED_PAGE = totalPages;
@@ -982,6 +1004,7 @@ async function setupSelected() {
   log((res.results || []).map(fmtSteps).join('\n\n'));
   showDiagnosis(res.results || []);
   await refresh();
+  notifyResults('Setup đã chọn xong', res.results || []);
 }
 async function applyHttpsSelected() {
   const domains = selectedDomains();
@@ -993,6 +1016,7 @@ async function applyHttpsSelected() {
   const res = await api('/api/set-https-batch', { domains, ssl });
   log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓' : 'LỖI: ' + (r.error || '')}`).join('\n'));
   await refresh();
+  notifyResults('Áp HTTPS đã chọn xong', res.results || []);
 }
 async function applyRecordsSelected() {
   const domains = selectedDomains();
@@ -1003,6 +1027,7 @@ async function applyRecordsSelected() {
   const res = await api('/api/apply-records-batch', { domains, preset });
   log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓ — ' + (r.detail || '') : 'LỖI: ' + (r.error || '')}`).join('\n'));
   await refresh();
+  notifyResults('Áp record đã chọn xong', res.results || []);
 }
 async function bypassCacheSelected(enable) {
   const domains = selectedDomains();
@@ -1012,6 +1037,7 @@ async function bypassCacheSelected(enable) {
   const res = await api('/api/cache-bypass-batch', { domains, enabled: enable });
   log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓ — ' + (r.detail || '') : 'LỖI: ' + (r.error || '')}`).join('\n'));
   await refresh();
+  notifyResults(enable ? 'Bypass cache đã chọn xong' : 'Gỡ Bypass cache đã chọn xong', res.results || []);
 }
 async function deleteZonesSelected() {
   const domains = selectedDomains();
@@ -1022,6 +1048,7 @@ async function deleteZonesSelected() {
   const res = await api('/api/delete-zones-batch', { domains });
   log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'ĐÃ XÓA ✓' : 'LỖI: ' + (r.error || '')}`).join('\n'));
   await refresh();
+  notifyResults('Xóa zone đã chọn xong', res.results || []);
 }
 async function checkSelected() {
   const domains = selectedDomains();
@@ -1033,6 +1060,8 @@ async function checkSelected() {
   }
   renderTable();
   log('Đã kiểm tra xong ' + domains.length + ' domain.');
+  const errs = domains.filter(d => isErrorStatus(STATE.status[d]));
+  notify('Kiểm tra đã chọn xong', `Đã kiểm tra xong <b>${domains.length}</b> domain.` + (errs.length ? `<br>Còn <b>${errs.length}</b> domain bị lỗi: ${namesHtml(errs)}` : '<br>Không còn domain nào bị lỗi.'));
 }
 
 // ---------------------------------------------------------------- popup Edit
@@ -1231,6 +1260,7 @@ async function addDomain() {
   STATE.config.domains = res.domains;
   document.getElementById('newDomain').value = '';
   renderTable();
+  notify('Đã thêm domain', `Đã thêm <b>${esc(d)}</b> vào bảng quản lý.`);
 }
 document.getElementById('newDomain').addEventListener('keydown', e => { if (e.key === 'Enter') addDomain(); });
 async function removeDomain(d) {
@@ -1245,6 +1275,35 @@ function fmtSteps(res) {
   const lines = [`${res.domain || ''} — ${res.ok ? 'XONG ✓' : 'CHƯA XONG ✗'}`];
   (res.steps || []).forEach(s => lines.push(`  [${s.ok ? '✓' : '✗'}] ${s.step}${s.detail ? ' — ' + s.detail : ''}`));
   return lines.join('\n');
+}
+// Cua so thong bao hien sau khi 1 lenh chay xong (ten domain nao lam
+// xong / bo qua / loi). Bam "Đóng" hoac bam ra ngoai de tat.
+function notify(title, html) {
+  document.getElementById('notifyTitle').textContent = title;
+  document.getElementById('notifyBody').innerHTML = html;
+  document.getElementById('notifyModal').classList.add('open');
+}
+function closeNotify() {
+  document.getElementById('notifyModal').classList.remove('open');
+}
+function namesHtml(names) {
+  if (!names.length) return '';
+  const shown = names.slice(0, 20);
+  return `<div class="mono" style="max-height:160px;overflow:auto;margin-top:6px">${shown.map(esc).join('<br>')}</div>` +
+    (names.length > shown.length ? `<div class="muted">và ${names.length - shown.length} domain nữa…</div>` : '');
+}
+function notifyResults(title, results) {
+  // results: [{domain, ok, already_set?}] — tom tat xong/bo qua/loi
+  // kem ten domain.
+  const ok = results.filter(r => r.ok && !r.already_set).map(r => r.domain);
+  const skipped = results.filter(r => r.already_set).map(r => r.domain);
+  const failed = results.filter(r => !r.ok).map(r => r.domain);
+  let html = '';
+  if (ok.length) html += `Xong <b>${ok.length}</b> domain:${namesHtml(ok)}`;
+  if (skipped.length) html += `${html ? '<br>' : ''}Đã set đủ nên bỏ qua <b>${skipped.length}</b> domain:${namesHtml(skipped)}`;
+  if (failed.length) html += `${html ? '<br>' : ''}Lỗi <b>${failed.length}</b> domain:${namesHtml(failed)}`;
+  if (!html) html = 'Không có kết quả.';
+  notify(title, html);
 }
 async function checkOne(d) {
   log(`Đang kiểm tra ${d}…`);
@@ -1263,58 +1322,101 @@ function stopBatchCheck() {
   BATCH_CHECK.stopped = true;
   log('Đã bấm dừng — sẽ dừng sau loat hiện tại.');
 }
-async function checkAll() {
-  // Kiem tra TAT CA theo loat 30 cai/lan, xong loat thi tu dong tiep
-  // loat sau (nghi 5s giua cac loat). CHI kiem tra domain CHUA co
-  // trang thai — domain da kiem tra thi bo qua, vi trang thai luu san
-  // tren server (status.json) nen mo lai trang / bam lai nut van tiep
-  // tuc tu cho dung (vd da co 60/410 thi kiem tra tu 61), khong quet
-  // lai tu dau. Dung ngay khi dinh 429.
-  if (BATCH_CHECK.running) { log('Đang kiểm tra theo loat — đợi chạy xong hoặc bấm Dừng.'); return; }
-  const all = STATE.config.domains || [];
-  if (!all.length) { log('Chưa có domain nào.'); return; }
-  const todo = all.filter(d => !STATE.status[d]);
-  const alreadyDone = all.length - todo.length;
-  if (!todo.length) {
-    log(`Đã kiểm tra hết ${all.length} domain rồi. Muốn kiểm tra lại domain cụ thể thì tick rồi bấm "Kiểm tra đã chọn".`);
-    setBatchProgress(`Đã kiểm tra hết ${all.length} domain.`);
-    return;
-  }
-  BATCH_CHECK = { running: true, list: todo, index: 0, stopped: false };
+function isErrorStatus(s) { return !!(s && s.error); }
+function errorDomains() {
+  return (STATE.config.domains || []).filter(d => isErrorStatus(STATE.status[d]));
+}
+function todoDomains() {
+  // Domain chua co trang thai HOAC trang thai dang loi — deu can kiem tra.
+  return (STATE.config.domains || []).filter(d => !STATE.status[d] || isErrorStatus(STATE.status[d]));
+}
+function renderErrorCount() {
+  const errs = errorDomains();
+  const el = document.getElementById('errorCount');
+  const btn = document.getElementById('recheckErrorsBtn');
+  if (!el || !btn) return;
+  el.textContent = errs.length ? `⚠️ ${errs.length} domain bị lỗi` : '';
+  btn.style.display = errs.length ? '' : 'none';
+}
+async function runBatchCheck(list, label) {
+  // Chay 1 danh sach theo loat 30 cai/lan, xong loat tu dong tiep loat
+  // sau (nghi 5s). Tra ve {done, checked, total} hoac null neu dang
+  // co loat khac chay.
+  if (BATCH_CHECK.running) { log('Đang kiểm tra theo loat — đợi chạy xong hoặc bấm Dừng.'); return null; }
+  BATCH_CHECK = { running: true, list, index: 0, stopped: false };
   document.getElementById('batchStopBtn').style.display = '';
-  log(`Đã có ${alreadyDone}/${all.length} domain — kiểm tra tiếp ${todo.length} domain chưa có trạng thái theo loat ${BATCH_SIZE} cái/lần, tự động tiếp tục…`);
+  const all = STATE.config.domains || [];
+  const startGood = all.filter(d => STATE.status[d] && !isErrorStatus(STATE.status[d])).length;
+  log(`${label} — ${list.length} domain (đã có ${startGood}/${all.length} tốt)…`);
   while (BATCH_CHECK.index < BATCH_CHECK.list.length) {
     if (BATCH_CHECK.stopped) break;
     if (rateLimited()) {
-      log('Đang trong thời gian chờ giới hạn tốc độ (429) — dừng loat, đợi vài phút rồi bấm "Kiểm tra tất cả" lại để tiếp tục.');
+      log('Đang trong thời gian chờ giới hạn tốc độ (429) — dừng loat, đợi vài phút rồi bấm lại để tiếp tục.');
       break;
     }
     const batch = BATCH_CHECK.list.slice(BATCH_CHECK.index, BATCH_CHECK.index + BATCH_SIZE);
-    const from = alreadyDone + BATCH_CHECK.index + 1;
-    const to = alreadyDone + BATCH_CHECK.index + batch.length;
+    const from = startGood + BATCH_CHECK.index + 1;
+    const to = startGood + BATCH_CHECK.index + batch.length;
     setBatchProgress(`Đang kiểm tra ${from}–${to}/${all.length}…`);
     const res = await api('/api/check', { domains: batch });
     STATE.status = { ...STATE.status, ...res.status };
     BATCH_CHECK.index += batch.length;
     renderTable();
     renderEmailTab();
+    if (res.kept) log(`Giữ nguyên trạng thái cũ của ${res.kept} domain do kiểm tra lại bị lỗi (429/throttle) — dữ liệu tốt không bị xóa.`);
     if (res.rate_limited) {
       RATE_LIMIT_UNTIL = Date.now() + 5 * 60 * 1000;
-      log(`Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đã kiểm tra ${alreadyDone + BATCH_CHECK.index}/${all.length} domain. Đợi ~5 phút rồi bấm "Kiểm tra tất cả" lại để tiếp tục từ chỗ dừng.`);
+      log(`Dừng sớm do Cloudflare/Namecheap giới hạn tốc độ (429) — đã kiểm tra ${BATCH_CHECK.index}/${BATCH_CHECK.list.length} domain trong loat này. Đợi ~5 phút rồi bấm lại để tiếp tục từ chỗ dừng.`);
       break;
     }
     if (BATCH_CHECK.index < BATCH_CHECK.list.length)
       await new Promise(r => setTimeout(r, 5000));
   }
   const done = BATCH_CHECK.index >= BATCH_CHECK.list.length;
-  if (done) {
-    setBatchProgress(`Đã kiểm tra xong ${all.length} domain.`);
-    log(`Đã kiểm tra xong ${all.length} domain.`);
-  } else {
-    setBatchProgress(`Đã dừng ở ${alreadyDone + BATCH_CHECK.index}/${all.length} — bấm "Kiểm tra tất cả" để tiếp tục.`);
-  }
   BATCH_CHECK.running = false;
   document.getElementById('batchStopBtn').style.display = 'none';
+  return { done, checked: BATCH_CHECK.index, total: BATCH_CHECK.list.length };
+}
+async function checkAll() {
+  // Kiem tra TAT CA theo loat 30 cai/lan. CHI kiem tra domain CHUA co
+  // trang thai hoac trang thai dang LOI — domain da kiem tra tot thi bo
+  // qua (trang thai luu san tren server nen mo lai trang / bam lai nut
+  // van tiep tuc tu cho dung, vd da co 60/410 thi kiem tra tu 61).
+  const todo = todoDomains();
+  const all = STATE.config.domains || [];
+  if (!all.length) { log('Chưa có domain nào.'); return; }
+  if (!todo.length) {
+    log(`Đã kiểm tra hết ${all.length} domain rồi. Muốn kiểm tra lại domain cụ thể thì tick rồi bấm "Kiểm tra đã chọn".`);
+    setBatchProgress(`Đã kiểm tra hết ${all.length} domain.`);
+    notify('Kiểm tra xong', `Đã kiểm tra hết <b>${all.length}</b> domain, không còn domain nào chưa kiểm tra hoặc bị lỗi.`);
+    return;
+  }
+  const r = await runBatchCheck(todo, `Kiểm tra tất cả — còn ${todo.length} domain chưa có trạng thái hoặc bị lỗi`);
+  if (!r) return;
+  const errs = errorDomains().length;
+  if (r.done) {
+    setBatchProgress(`Đã kiểm tra xong ${all.length} domain.`);
+    log(`Đã kiểm tra xong ${all.length} domain.${errs ? ` Còn ${errs} domain bị lỗi — bấm "Kiểm tra lại domain bị lỗi" để thử lại.` : ''}`);
+    notify('Kiểm tra xong', `Đã kiểm tra xong <b>${all.length}</b> domain.` + (errs ? `<br>Còn <b>${errs}</b> domain bị lỗi: ${namesHtml(errorDomains())}` : '<br>Không còn domain nào bị lỗi.'));
+  } else {
+    setBatchProgress(`Đã dừng ở ${r.checked}/${r.total} — bấm "Kiểm tra tất cả" để tiếp tục.`);
+  }
+}
+async function recheckErrors() {
+  const errs = errorDomains();
+  if (!errs.length) { log('Không còn domain nào bị lỗi.'); return; }
+  const r = await runBatchCheck(errs, `Kiểm tra lại ${errs.length} domain bị lỗi`);
+  if (!r) return;
+  const remaining = errorDomains().length;
+  if (r.done) {
+    setBatchProgress(remaining ? `Còn ${remaining} domain bị lỗi.` : 'Đã kiểm tra xong, hết lỗi.');
+    log(remaining ? `Đã kiểm tra lại xong, còn ${remaining} domain bị lỗi.` : 'Đã kiểm tra lại xong, hết domain bị lỗi.');
+    notify('Kiểm tra lại domain bị lỗi xong', remaining
+      ? `Còn <b>${remaining}</b> domain bị lỗi: ${namesHtml(errorDomains())}`
+      : 'Hết domain bị lỗi — tất cả đã kiểm tra xong.');
+  } else {
+    setBatchProgress(`Đã dừng ở ${r.checked}/${r.total} — bấm lại để tiếp tục.`);
+  }
 }
 async function setupOne(d) {
   if (!confirm(`Setup ${d}?\n- Tạo/lấy zone Cloudflare\n- Đổi NS ở Namecheap (API)\n- Áp preset mặc định (${STATE.config.default_preset || 'chưa có'})`)) return;
@@ -1323,6 +1425,9 @@ async function setupOne(d) {
   log(fmtSteps(res));
   showDiagnosis([res]);
   await refresh();
+  notify(res.ok ? `Setup xong ${d}` : `Setup ${d} chưa xong`,
+    res.ok ? `Domain <b>${esc(d)}</b> đã setup xong (zone, NS, record, email, HTTPS theo preset).`
+           : `Domain <b>${esc(d)}</b> chưa setup xong — xem log bên dưới để biết bước nào lỗi.`);
 }
 async function applyPreset(d) {
   const preset = STATE.config.default_preset;

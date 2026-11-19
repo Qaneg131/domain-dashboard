@@ -78,8 +78,11 @@ def _records_match(records, preset, domain):
     return want and want <= have
 
 
-def check_domain(domain, cfg):
-    """Trang thai 1 domain: zone CF, NS (DNS cong + Namecheap), records."""
+def check_domain(domain, cfg, skip_nc=False):
+    """Trang thai 1 domain: zone CF, NS (DNS cong + Namecheap), records.
+    skip_nc=True (kiem tra theo loat): bo qua luon goi Namecheap API —
+    registrar NS chi can khi mo popup Edit (luc do check le se lay),
+    con quet loat 410 domain ma goi NC tung domain thi NC throttle ngay."""
     domain = domain.strip().lower()
     st = {"domain": domain, "checked_at": time.strftime("%H:%M:%S %d/%m/%Y"),
           "zone": None, "doh_ns": [], "registrar_ns": [],
@@ -101,7 +104,7 @@ def check_domain(domain, cfg):
         if st["zone"] and st["doh_ns"]:
             want = {x.lower() for x in st["zone"]["name_servers"]}
             st["ns_ok"] = bool(want) and set(st["doh_ns"]) == want
-        if _nc_configured(cfg):
+        if _nc_configured(cfg) and not skip_nc:
             if st["ns_ok"]:
                 # DNS cong da tro dung NS Cloudflare thi chac chan
                 # registrar cung da ghi dung — khoi goi Namecheap API
@@ -618,20 +621,38 @@ def _is_rate_limited(st):
     return "429" in joined or "throttl" in joined.lower()
 
 
+def _save_check_result(st, d, new_st):
+    """Luu ket qua check: neu check moi LOI (error) ma trang thai cu da
+    tot (co zone) thi GIU trang thai cu — loi thoang qua (429/throttle)
+    khong duoc xoa du lieu tot da co. Domain moi (chua co trang thai)
+    hoac trang thai cu cung loi thi luu loi moi de con thay ma kiem
+    tra lai."""
+    old = st.get(d)
+    if new_st.get("error") and old and old.get("zone"):
+        return False  # giu trang thai cu
+    st[d] = new_st
+    return True
+
+
 def _check_many(domains, cfg, st):
     """Kiem tra nhieu domain: nghi 0.3s giua cac domain de bot dot
     API, DUNG NGAY khi gap gioi han toc do (429/throttling) de khong
-    dot tiep. Tra ve (so domain da check, co bi gioi han khong)."""
+    dot tiep. Bo qua goi Namecheap trong loat (xem check_domain).
+    Tra ve (so domain da check, co bi gioi han khong, so domain giu
+    trang thai cu do check moi loi)."""
     checked = 0
     limited = False
+    kept = 0
     for d in domains:
-        st[d] = check_domain(d, cfg)
+        new_st = check_domain(d, cfg, skip_nc=True)
+        if not _save_check_result(st, d, new_st):
+            kept += 1
         checked += 1
-        if _is_rate_limited(st[d]):
+        if _is_rate_limited(new_st):
             limited = True
             break
         time.sleep(0.3)
-    return checked, limited
+    return checked, limited, kept
 
 
 # ------------------------------------------------------------------- server
@@ -747,33 +768,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "domains": cfg["domains"]})
             elif path == "/api/check":
                 if body.get("all"):
-                    checked, limited = _check_many(cfg["domains"], cfg, st)
+                    checked, limited, kept = _check_many(cfg["domains"], cfg, st)
                     save_status(st)
                     self._json({"ok": True, "status": st,
                                 "checked": checked,
                                 "total": len(cfg["domains"]),
-                                "rate_limited": limited})
+                                "rate_limited": limited, "kept": kept})
                 elif body.get("domains"):
                     # Kiem tra 1 loat domain (trang hien tai cua bang, hoac
                     # 1 loat 30 cai cua "Kiem tra tat ca") — chi tra ve
                     # trang thai cua loat do.
                     wanted = [str(x).strip().lower() for x in body["domains"]
                               if str(x).strip()]
-                    checked, limited = _check_many(wanted, cfg, st)
+                    checked, limited, kept = _check_many(wanted, cfg, st)
                     save_status(st)
                     self._json({"ok": True,
                                 "status": {d: st[d] for d in wanted if d in st},
-                                "checked": checked, "rate_limited": limited})
+                                "checked": checked, "rate_limited": limited,
+                                "kept": kept})
                 else:
                     d = str(body.get("domain", "")).strip().lower()
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"ok": True, "status": {d: st[d]}})
             elif path == "/api/setup":
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 res = setup_domain(d, preset, cfg)
-                st[d] = check_domain(d, cfg)
+                _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json(res)
             elif path == "/api/setup-all":
@@ -782,7 +804,7 @@ class Handler(BaseHTTPRequestHandler):
                 for d in cfg["domains"]:
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results})
             elif path == "/api/setup-batch":
@@ -805,7 +827,7 @@ class Handler(BaseHTTPRequestHandler):
                         cfg["domains"].append(d)
                     res = setup_domain(d, preset, cfg)
                     results.append(res)
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results})
@@ -823,7 +845,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
                 res = apply_preset(d, preset, cfg)
-                st[d] = check_domain(d, cfg)
+                _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json(res)
             elif path == "/api/domain-detail":
@@ -853,7 +875,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Ma xac minh nhap tay (lay tu Search Console).
                 d = str(body.get("domain", "")).strip().lower()
                 ok, detail = set_gsc_record(d, body.get("value", ""), cfg)
-                st[d] = check_domain(d, cfg)
+                _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "detail": detail})
             elif path == "/api/setup-email":
@@ -868,7 +890,7 @@ class Handler(BaseHTTPRequestHandler):
                         {"step": "Tim zone", "ok": False, "detail": err}]})
                     return
                 steps, ok = _apply_email_preset(d, cfg, cf, zone)
-                st[d] = check_domain(d, cfg)
+                _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "steps": steps})
             elif path == "/api/setup-email-batch":
@@ -885,7 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                 for d in domains:
                     r = _setup_email_one(d, cfg)
                     results.append(r)
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     if any("429" in str(s.get("detail", ""))
                            for s in r.get("steps", [])):
                         results.append({"domain": "(con lai)", "ok": False,
@@ -906,7 +928,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 ns = [x.lower() for x in zone.get("name_servers", [])]
                 steps, ok = _sync_ns(d, ns, cfg)
-                st[d] = check_domain(d, cfg)
+                _save_check_result(st, d, check_domain(d, cfg))
                 save_status(st)
                 self._json({"domain": d, "ok": ok, "steps": steps})
             elif path == "/api/set-records":
@@ -936,7 +958,7 @@ class Handler(BaseHTTPRequestHandler):
                                          expand_name(d, r.get("name", "")),
                                          ct, bool(r.get("proxied", True)))
                         added += 1
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "steps": [
                         {"step": "Luu records", "ok": True,
@@ -959,7 +981,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         cf.disable_email_routing(zone["id"])
                         msg = "da tat Email Routing"
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "message": msg})
                 except Exception as e:
@@ -1022,7 +1044,7 @@ class Handler(BaseHTTPRequestHandler):
                                        always_https=body.get("always_https"),
                                        rewrites=body.get("rewrites"),
                                        min_tls=body.get("min_tls_version"))
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "https": out})
                 except Exception as e:
@@ -1047,7 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
                                            always_https=hp.get("always_https"),
                                            rewrites=hp.get("rewrites"),
                                            min_tls=hp.get("min_tls_version"))
-                        st[d] = check_domain(d, cfg)
+                        _save_check_result(st, d, check_domain(d, cfg))
                         results.append({"domain": d, "ok": True, "https": out})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
@@ -1072,7 +1094,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     try:
                         detail, okb = _sync_records(d, recs, cf, zone)
-                        st[d] = check_domain(d, cfg)
+                        _save_check_result(st, d, check_domain(d, cfg))
                         results.append({"domain": d, "ok": okb, "detail": detail})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
@@ -1094,7 +1116,7 @@ class Handler(BaseHTTPRequestHandler):
                         r = cf.remove_cache_bypass(zone["id"])
                         msg = ("da go rule By Pass" if r.get("removed")
                                else "khong co rule By Pass de go")
-                    st[d] = check_domain(d, cfg)
+                    _save_check_result(st, d, check_domain(d, cfg))
                     save_status(st)
                     self._json({"domain": d, "ok": True, "message": msg})
                 except Exception as e:
@@ -1117,7 +1139,7 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             r = cf.remove_cache_bypass(zone["id"])
                             detail = "da go rule" if r.get("removed") else "khong co rule"
-                        st[d] = check_domain(d, cfg)
+                        _save_check_result(st, d, check_domain(d, cfg))
                         results.append({"domain": d, "ok": True, "detail": detail})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})

@@ -790,6 +790,49 @@ def main():
     assert not r31e["ok"], r31e
     print("  OK", flush=True)
 
+    print("TEST 32: _save_check_result — check moi loi khong xoa trang thai tot cu...", flush=True)
+    good = {"domain": "good.com", "zone": {"id": "z1", "status": "active",
+            "name_servers": [NS1, NS2]}, "error": None}
+    err = {"domain": "good.com", "zone": None,
+           "error": "Please wait and consider throttling your request speed"}
+    st32 = {"good.com": dict(good)}
+    assert dash._save_check_result(st32, "good.com", err) is False, st32
+    assert st32["good.com"]["zone"] is not None and not st32["good.com"]["error"], st32
+    # Domain moi chua co trang thai: luu loi de con thay ma kiem tra lai.
+    assert dash._save_check_result(st32, "new.com", dict(err, domain="new.com")) is True
+    assert st32["new.com"]["error"], st32
+    # Trang thai cu cung loi: check moi tot se ghi de.
+    assert dash._save_check_result(st32, "new.com", dict(good, domain="new.com")) is True
+    assert st32["new.com"]["zone"] is not None, st32
+    # _check_many: check loi (khong co token) giu trang thai tot, dem kept.
+    cfg_notoken = dict(cfg6)
+    cfg_notoken["cf_token"] = ""
+    st32b = {"good.com": dict(good)}
+    checked, limited, kept = dash._check_many(["good.com", "new.com"], cfg_notoken, st32b)
+    assert checked == 2 and not limited and kept == 1, (checked, limited, kept)
+    assert st32b["good.com"]["zone"] is not None, st32b
+    assert st32b["new.com"]["error"], st32b
+    print("  OK", flush=True)
+
+    print("TEST 33: check_domain(skip_nc=True) — loat check khong goi Namecheap...", flush=True)
+    z17, _c = cf.get_or_create_zone("skipncbatch.com")
+    STATE["nc_ns"]["skipncbatch.com"] = ["dns1.registrar-servers.com",
+                                         "dns2.registrar-servers.com"]  # DoH chua tro dung NS zone
+    STATE["nc_calls"] = 0
+    st33 = dash.check_domain("skipncbatch.com", cfg6)
+    assert not st33["ns_ok"] and STATE["nc_calls"] == 1, (st33, STATE["nc_calls"])
+    STATE["nc_calls"] = 0
+    st33b = dash.check_domain("skipncbatch.com", cfg6, skip_nc=True)
+    assert not st33b["ns_ok"] and STATE["nc_calls"] == 0, (st33b, STATE["nc_calls"])
+    assert st33b["registrar_ns"] == [], st33b
+    # _check_many (loat) cung bo qua NC.
+    STATE["nc_calls"] = 0
+    st33c = {}
+    checked, limited, kept = dash._check_many(["skipncbatch.com"], cfg6, st33c)
+    assert checked == 1 and not limited and STATE["nc_calls"] == 0, \
+        (checked, limited, STATE["nc_calls"])
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 
