@@ -186,6 +186,71 @@ def _sync_ns(domain, ns, cfg):
         return steps, False
 
 
+def _expand_email_match(domain, match):
+    """'info@' -> 'info@<domain>'; '*' giu nguyen (catch-all)."""
+    match = (match or "").strip()
+    if match == "*":
+        return "*"
+    if match.endswith("@"):
+        return match + domain
+    return match
+
+
+def _apply_email_preset(domain, cfg, cf, zone):
+    """Buoc Email Routing trong Setup: bat routing (neu chua) roi dong bo
+    rule theo email_preset (rule nao co san giong het thi giu, khac thi
+    xoa roi tao lai). Tra ve (steps, ok)."""
+    steps = []
+    ep = cfg.get("email_preset") or {}
+    if not ep.get("enabled"):
+        steps.append({"step": "Email routing", "ok": True,
+                      "detail": "bo qua (email preset dang tat)"})
+        return steps, True
+    rules = [r for r in (ep.get("rules") or [])
+             if str(r.get("to", "")).strip() and str(r.get("match", "")).strip()]
+    if not rules:
+        steps.append({"step": "Email routing", "ok": True,
+                      "detail": "bo qua (chua nhap dia chi nhan o muc Email preset)"})
+        return steps, True
+    try:
+        er = cf.get_email_routing(zone["id"])
+        if not er.get("enabled"):
+            cf.enable_email_routing(zone["id"])
+            steps.append({"step": "Bat Email Routing", "ok": True,
+                          "detail": "da them/khoa 3 MX + SPF + DKIM"})
+        existing = cf.list_email_rules(zone["id"])
+
+        def match_key(rule):
+            mts = rule.get("matchers") or []
+            if mts and mts[0].get("type") == "all":
+                return "*"
+            vals = [m.get("value", "") for m in mts if m.get("value")]
+            return vals[0] if vals else ""
+
+        existing_by_match = {match_key(r): r for r in existing}
+        for r in rules:
+            match = _expand_email_match(domain, r["match"])
+            dests = [x.strip() for x in str(r["to"]).split(",") if x.strip()]
+            cur = existing_by_match.get(match)
+            cur_dests = []
+            if cur:
+                for a in cur.get("actions") or []:
+                    cur_dests.extend(a.get("value") or [])
+            if cur and sorted(cur_dests) == sorted(dests):
+                steps.append({"step": f"Rule {match}", "ok": True,
+                              "detail": "da co san"})
+                continue
+            if cur:
+                cf.delete_email_rule(zone["id"], cur["id"])
+            cf.create_email_rule(zone["id"], match, dests)
+            steps.append({"step": f"Rule {match} -> {', '.join(dests)}",
+                          "ok": True, "detail": "da tao"})
+        return steps, True
+    except Exception as e:
+        steps.append({"step": "Email routing", "ok": False, "detail": str(e)})
+        return steps, False
+
+
 def _get_zone_or_error(domain, cfg):
     """(cf, zone, error) — lay zone, bao loi ro neu chua co / chua co token."""
     if not cfg.get("cf_token"):
@@ -250,6 +315,26 @@ def setup_domain(domain, preset_name, cfg):
             except Exception as e:
                 step(f"Ap preset '{preset_name}'", False, str(e))
                 return {"domain": domain, "ok": False, "steps": steps}
+
+    # 4. Email routing theo preset (sau records de MX/SPF/DKIM khong bi xoa).
+    email_steps, _email_ok = _apply_email_preset(domain, cfg, cf, zone)
+    steps.extend(email_steps)
+
+    # 5. HTTPS theo preset (Flexible + Always Use HTTPS + TLS 1.2).
+    hp = cfg.get("https_preset") or {}
+    if hp.get("enabled"):
+        try:
+            out = cf.set_https(zone["id"], ssl=hp.get("ssl"),
+                               always_https=hp.get("always_https"),
+                               rewrites=hp.get("rewrites"),
+                               min_tls=hp.get("min_tls_version"))
+            step("HTTPS", True,
+                 f"ssl={out.get('ssl')}, always_https={out.get('always_https')}, "
+                 f"min_tls={out.get('min_tls')}")
+        except Exception as e:
+            step("HTTPS", False, str(e))
+    else:
+        step("HTTPS", True, "bo qua (https preset dang tat)")
     ok = all(s["ok"] for s in steps)
     return {"domain": domain, "ok": ok, "steps": steps}
 
@@ -331,6 +416,20 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"error": str(e)}, 500)
             return
+        if path == "/api/account-zones":
+            cfg = load_config()
+            if not cfg.get("cf_token"):
+                self._json({"error": "chua nhap Cloudflare API token"}, 400)
+                return
+            try:
+                zones = _cf_client(cfg).list_zones()
+                self._json({"zones": [{"name": z.get("name"),
+                                       "status": z.get("status"),
+                                       "name_servers": z.get("name_servers", [])}
+                                      for z in zones]})
+            except Exception as e:
+                self._json({"error": str(e)}, 500)
+            return
         self._json({"error": "khong co route"}, 404)
 
     def do_POST(self):
@@ -390,6 +489,40 @@ class Handler(BaseHTTPRequestHandler):
                     st[d] = check_domain(d, cfg)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/setup-batch":
+                # Setup theo danh sach nhap trong phien nay (moi dong 1 domain).
+                # Chi xu ly dung cac domain trong danh sach — khong dong
+                # den domain khac trong tai khoan.
+                raw = body.get("domains") or []
+                if isinstance(raw, str):
+                    raw = raw.splitlines()
+                seen, domains = set(), []
+                for x in raw:
+                    d = str(x).strip().lower()
+                    if d and "." in d and d not in seen:
+                        seen.add(d)
+                        domains.append(d)
+                preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                results = []
+                for d in domains:
+                    if d not in cfg["domains"]:
+                        cfg["domains"].append(d)
+                    res = setup_domain(d, preset, cfg)
+                    results.append(res)
+                    st[d] = check_domain(d, cfg)
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/email-preset":
+                ep = {"enabled": bool(body.get("enabled", True)), "rules": []}
+                for r in (body.get("rules") or []):
+                    m = str(r.get("match", "")).strip()
+                    t = str(r.get("to", "")).strip()
+                    if m:
+                        ep["rules"].append({"match": m, "to": t})
+                cfg["email_preset"] = ep
+                save_config(cfg)
+                self._json({"ok": True, "email_preset": ep})
             elif path == "/api/apply-preset":
                 d = str(body.get("domain", "")).strip().lower()
                 preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
@@ -533,12 +666,45 @@ class Handler(BaseHTTPRequestHandler):
                     out = cf.set_https(zone["id"],
                                        ssl=body.get("ssl"),
                                        always_https=body.get("always_https"),
-                                       rewrites=body.get("rewrites"))
+                                       rewrites=body.get("rewrites"),
+                                       min_tls=body.get("min_tls_version"))
                     st[d] = check_domain(d, cfg)
                     save_status(st)
                     self._json({"domain": d, "ok": True, "https": out})
                 except Exception as e:
                     self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/set-https-batch":
+                # Ap HTTPS preset cho NHIEU domain da chon (checkbox o bang).
+                raw = body.get("domains") or []
+                domains = [str(x).strip().lower() for x in raw
+                           if str(x).strip() and "." in str(x)]
+                hp = cfg.get("https_preset") or {}
+                results = []
+                for d in domains:
+                    cf, zone, err = _get_zone_or_error(d, cfg)
+                    if err:
+                        results.append({"domain": d, "ok": False, "error": err})
+                        continue
+                    try:
+                        out = cf.set_https(zone["id"], ssl=hp.get("ssl"),
+                                           always_https=hp.get("always_https"),
+                                           rewrites=hp.get("rewrites"),
+                                           min_tls=hp.get("min_tls_version"))
+                        st[d] = check_domain(d, cfg)
+                        results.append({"domain": d, "ok": True, "https": out})
+                    except Exception as e:
+                        results.append({"domain": d, "ok": False, "error": str(e)})
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/https-preset":
+                hp = {"enabled": bool(body.get("enabled", True)),
+                      "ssl": str(body.get("ssl") or "flexible"),
+                      "always_https": str(body.get("always_https") or "on"),
+                      "min_tls_version": str(body.get("min_tls_version") or "1.2"),
+                      "rewrites": str(body.get("rewrites") or "on")}
+                cfg["https_preset"] = hp
+                save_config(cfg)
+                self._json({"ok": True, "https_preset": hp})
             elif path == "/api/presets":
                 name = str(body.get("name", "")).strip()
                 recs = body.get("records") or []

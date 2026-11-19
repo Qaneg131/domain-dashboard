@@ -87,6 +87,18 @@ class CFClient:
             return z, False
         return self.create_zone(name), True
 
+    def list_zones(self):
+        """Tat ca zone trong tai khoan (de tab 'Tat ca trong tai khoan')."""
+        out, page = [], 1
+        while True:
+            payload = self._req("GET", f"/zones?per_page=100&page={page}")
+            out.extend(self._ok(payload) or [])
+            info = payload.get("result_info") or {}
+            if page >= info.get("total_pages", 1):
+                break
+            page += 1
+        return out
+
     # ---------------------------------------------------------- records
     def list_records(self, zone_id):
         out, page = [], 1
@@ -113,12 +125,19 @@ class CFClient:
         payload = self._req("DELETE", f"/zones/{zone_id}/dns_records/{record_id}")
         return self._ok(payload)
 
-    def delete_all_records(self, zone_id):
-        """Xoa het record cu. Tra ve so record da xoa."""
+    def delete_all_records(self, zone_id, preserve_email=True):
+        """Xoa het record cu. Tra ve so record da xoa.
+        Mac dinh GIU LAI record he thong cua Email Routing (3 MX
+        route*.mx.cloudflare.net + SPF + DKIM) de ap preset khong lam
+        hong email — cac record nay do chuc nang Email Routing quan ly."""
         recs = self.list_records(zone_id)
+        kept = 0
         for r in recs:
+            if preserve_email and _is_email_routing_record(r):
+                kept += 1
+                continue
             self.delete_record(zone_id, r["id"])
-        return len(recs)
+        return len(recs) - kept
 
     # --------------------------------------------------- zone settings (HTTPS)
     def get_setting(self, zone_id, name):
@@ -133,15 +152,17 @@ class CFClient:
         return self._ok(payload)
 
     def get_https(self, zone_id):
-        """{'ssl': 'off|flexible|full|strict', 'always_https': 'on|off',
-        'rewrites': 'on|off', 'ok': bool} — ok = ssl != off va always_https on."""
+        """{'ssl', 'always_https', 'rewrites', 'min_tls', 'ok'} —
+        ok = ssl != off va always_https on."""
         ssl = self.get_setting(zone_id, "ssl").get("value", "off")
         auh = self.get_setting(zone_id, "always_use_https").get("value", "off")
         rew = self.get_setting(zone_id, "automatic_https_rewrites").get("value", "off")
-        return {"ssl": ssl, "always_https": auh, "rewrites": rew,
+        tls = self.get_setting(zone_id, "min_tls_version").get("value", "1.0")
+        return {"ssl": ssl, "always_https": auh, "rewrites": rew, "min_tls": tls,
                 "ok": ssl != "off" and auh == "on"}
 
-    def set_https(self, zone_id, ssl=None, always_https=None, rewrites=None):
+    def set_https(self, zone_id, ssl=None, always_https=None, rewrites=None,
+                  min_tls=None):
         out = {}
         if ssl is not None:
             out["ssl"] = self.set_setting(zone_id, "ssl", ssl).get("value")
@@ -151,6 +172,9 @@ class CFClient:
         if rewrites is not None:
             out["rewrites"] = self.set_setting(
                 zone_id, "automatic_https_rewrites", rewrites).get("value")
+        if min_tls is not None:
+            out["min_tls"] = self.set_setting(
+                zone_id, "min_tls_version", min_tls).get("value")
         return out
 
     # --------------------------------------------------- email routing
@@ -202,3 +226,17 @@ class CFClient:
         payload = self._req("POST", f"/zones/{zone_id}/email/routing/addresses",
                             {"email": email})
         return self._ok(payload)
+
+
+def _is_email_routing_record(r):
+    """Record do Email Routing tao/khoa (khong thuoc preset web)."""
+    t = (r.get("type") or "").upper()
+    name = (r.get("name") or "").lower()
+    content = (r.get("content") or "").lower()
+    if t == "MX" and "mx.cloudflare.net" in content:
+        return True
+    if t == "TXT" and "include:_spf.mx.cloudflare.net" in content:
+        return True
+    if t == "TXT" and name.startswith("cf2024-1._domainkey"):
+        return True
+    return False

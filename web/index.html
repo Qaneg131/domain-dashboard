@@ -91,7 +91,57 @@
   </div>
 
   <div class="card">
+    <h2>Email preset — rule forward áp trong lúc Setup</h2>
+    <p class="hint">Setup sẽ bật Email Routing rồi tạo các rule này (rule nào có sẵn giống hệt thì giữ).
+    <b>info@</b> nghĩa là info@&lt;domain đang setup&gt;, <b>*</b> là catch-all. Địa chỉ nhận phải bấm link xác minh trong mail thì rule mới forward được.</p>
+    <div class="row">
+      <label style="min-width:0"><input type="checkbox" id="emailPresetEnabled" checked> Bật email trong lúc Setup</label>
+      <button onclick="saveEmailPreset()">Lưu email preset</button>
+      <span class="muted" id="emailPresetMsg"></span>
+    </div>
+    <div id="emailPresetRows"></div>
+    <div class="row"><button class="secondary small" onclick="addEmailPresetRow()">+ Thêm rule</button></div>
+  </div>
+
+  <div class="card">
+    <h2>HTTPS preset — áp trong lúc Setup</h2>
+    <p class="hint">Setup sẽ set SSL/TLS theo cấu hình này cho từng domain (bước cuối). Mặc định: SSL <b>Flexible</b> + Always Use HTTPS bật + Minimum TLS <b>1.2</b>.</p>
+    <div class="row">
+      <label style="min-width:0"><input type="checkbox" id="httpsPresetEnabled" checked> Bật HTTPS trong lúc Setup</label>
+      <label>SSL mode</label>
+      <select id="httpsPresetSsl">
+        <option value="off">Off</option><option value="flexible">Flexible</option>
+        <option value="full">Full</option><option value="strict">Full (strict)</option>
+      </select>
+      <label>Minimum TLS</label>
+      <select id="httpsPresetTls">
+        <option value="1.0">TLS 1.0</option><option value="1.1">TLS 1.1</option>
+        <option value="1.2">TLS 1.2</option><option value="1.3">TLS 1.3</option>
+      </select>
+      <label style="min-width:0"><input type="checkbox" id="httpsPresetAlways" checked> Always Use HTTPS</label>
+      <label style="min-width:0"><input type="checkbox" id="httpsPresetRewrites" checked> Auto HTTPS Rewrites</label>
+      <button onclick="saveHttpsPreset()">Lưu HTTPS preset</button>
+      <span class="muted" id="httpsPresetMsg"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Setup theo danh sách</h2>
+    <p class="hint">Dán domain cần setup đợt này (mỗi dòng 1 domain), bấm Setup — tool check từng domain: DNS chưa set thì đổi NS, rồi áp preset record, rồi email routing. Chỉ xử lý đúng các domain trong ô này, không động đến domain khác.</p>
+    <textarea id="batchDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="elvellia.com&#10;welvella.com"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button onclick="setupBatch()">Setup danh sách</button>
+      <button class="secondary" onclick="addBatchToManaged()">Thêm các domain này vào bảng quản lý</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Domains</h2>
+    <div class="row">
+      <button id="tabManaged" onclick="showDomainTab('managed')">Danh sách quản lý</button>
+      <button class="secondary" id="tabAccount" onclick="showDomainTab('account')">Tất cả trong tài khoản</button>
+    </div>
+    <div id="managedTab">
     <div class="row">
       <input type="text" id="newDomain" placeholder="vd: elvellia.com (Enter để thêm)" style="max-width:300px">
       <button onclick="addDomain()">Thêm domain</button>
@@ -99,10 +149,29 @@
       <button onclick="setupAll()">Setup tất cả (preset mặc định)</button>
       <span class="muted" id="domainCount"></span>
     </div>
+    <div class="row" id="bulkBar">
+      <span class="muted" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
+      <button class="secondary small" onclick="setupSelected()">Setup đã chọn</button>
+      <button class="secondary small" onclick="applyHttpsSelected()">Áp HTTPS đã chọn</button>
+      <button class="secondary small" onclick="checkSelected()">Kiểm tra đã chọn</button>
+    </div>
     <table>
-      <thead><tr><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th></th></tr></thead>
-      <tbody id="domainTable"><tr><td colspan="6" class="muted">Đang tải…</td></tr></tbody>
+      <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th></th></tr></thead>
+      <tbody id="domainTable"><tr><td colspan="7" class="muted">Đang tải…</td></tr></tbody>
     </table>
+    </div>
+    <div id="accountTab" style="display:none">
+      <div class="row">
+        <input type="text" id="accountSearch" placeholder="Tìm domain trong tài khoản…" style="max-width:300px" oninput="renderAccountZones()">
+        <button class="secondary" onclick="loadAccountZones()">Tải lại danh sách</button>
+        <span class="muted" id="accountCount"></span>
+      </div>
+      <table>
+        <thead><tr><th>Name</th><th>Status</th><th>Nameserver</th><th></th></tr></thead>
+        <tbody id="accountTable"><tr><td colspan="4" class="muted">Bấm "Tải lại danh sách" để xem hết domain trong tài khoản Cloudflare.</td></tr></tbody>
+      </table>
+      <p class="hint">Tab này chỉ liệt kê — bấm "Thêm" để đưa domain vào bảng quản lý rồi mới Setup. Sửa tay: đổi tên/IP preset ở mục Preset record / Email preset, hoặc bấm Edit ở bảng quản lý.</p>
+    </div>
   </div>
 
   <div class="card">
@@ -162,11 +231,16 @@
         <option value="off">Off</option><option value="flexible">Flexible</option>
         <option value="full">Full</option><option value="strict">Full (strict)</option>
       </select>
+      <label>Minimum TLS</label>
+      <select id="editMinTls">
+        <option value="1.0">TLS 1.0</option><option value="1.1">TLS 1.1</option>
+        <option value="1.2">TLS 1.2</option><option value="1.3">TLS 1.3</option>
+      </select>
       <label style="min-width:0"><input type="checkbox" id="editAlwaysHttps"> Always Use HTTPS</label>
       <label style="min-width:0"><input type="checkbox" id="editRewrites"> Auto HTTPS Rewrites</label>
       <button onclick="saveHttps()">Lưu HTTPS</button>
     </div>
-    <p class="hint">Khuyên dùng: Full (hoặc Full strict nếu origin có chứng chỉ hợp lệ) + Always Use HTTPS bật.</p>
+    <p class="hint">Khuyên dùng: Flexible (origin chưa có chứng chỉ hợp lệ) + Always Use HTTPS bật + Minimum TLS 1.2.</p>
   </div>
 </div>
 <script>
@@ -194,6 +268,8 @@ async function refresh() {
   document.getElementById('nc_client_ip').value = cfg.nc_client_ip || '';
   if (!cfg.cf_token || !cfg.nc_api_key) document.getElementById('settingsBox').open = true;
   renderPresets();
+  renderEmailPreset();
+  renderHttpsPreset();
   renderTable();
 }
 
@@ -271,6 +347,121 @@ async function setDefaultPreset() {
   renderPresets();
   log(`Preset mặc định: ${name}`);
 }
+
+// ---------------------------------------------------------------- email preset
+function addEmailPresetRow(r) {
+  r = r || { match: '', to: '' };
+  const box = document.getElementById('emailPresetRows');
+  const div = document.createElement('div');
+  div.className = 'preset-row';
+  div.innerHTML = `<input class="e-match" placeholder="info@ hoặc * (catch-all)" value="${esc(r.match)}" style="max-width:200px">
+    <span class="muted">→</span>
+    <input class="e-to" placeholder="forward tới: ban@gmail.com" value="${esc(r.to)}">
+    <button class="secondary small" onclick="this.parentElement.remove()">✕</button>`;
+  box.appendChild(div);
+}
+function renderEmailPreset() {
+  const ep = (STATE.config || {}).email_preset || { enabled: true, rules: [] };
+  document.getElementById('emailPresetEnabled').checked = !!ep.enabled;
+  const box = document.getElementById('emailPresetRows');
+  box.innerHTML = '';
+  (ep.rules || []).forEach(r => addEmailPresetRow(r));
+  if (!ep.rules || !ep.rules.length) addEmailPresetRow();
+}
+async function saveEmailPreset() {
+  const rules = [...document.querySelectorAll('#emailPresetRows .preset-row')].map(row => ({
+    match: row.querySelector('.e-match').value.trim(),
+    to: row.querySelector('.e-to').value.trim(),
+  }));
+  const res = await api('/api/email-preset', {
+    enabled: document.getElementById('emailPresetEnabled').checked, rules });
+  if (res.error) { alert(res.error); return; }
+  STATE.config.email_preset = res.email_preset;
+  document.getElementById('emailPresetMsg').textContent = 'Đã lưu.';
+  log('Đã lưu email preset.');
+}
+
+// ---------------------------------------------------------------- https preset
+function renderHttpsPreset() {
+  const hp = (STATE.config || {}).https_preset || {};
+  document.getElementById('httpsPresetEnabled').checked = hp.enabled !== false;
+  document.getElementById('httpsPresetSsl').value = hp.ssl || 'flexible';
+  document.getElementById('httpsPresetTls').value = hp.min_tls_version || '1.2';
+  document.getElementById('httpsPresetAlways').checked = hp.always_https !== 'off';
+  document.getElementById('httpsPresetRewrites').checked = hp.rewrites !== 'off';
+}
+async function saveHttpsPreset() {
+  const body = {
+    enabled: document.getElementById('httpsPresetEnabled').checked,
+    ssl: document.getElementById('httpsPresetSsl').value,
+    always_https: document.getElementById('httpsPresetAlways').checked ? 'on' : 'off',
+    min_tls_version: document.getElementById('httpsPresetTls').value,
+    rewrites: document.getElementById('httpsPresetRewrites').checked ? 'on' : 'off',
+  };
+  const res = await api('/api/https-preset', body);
+  if (res.error) { alert(res.error); return; }
+  STATE.config.https_preset = res.https_preset;
+  document.getElementById('httpsPresetMsg').textContent = 'Đã lưu.';
+  log('Đã lưu HTTPS preset.');
+}
+
+// ---------------------------------------------------------------- batch setup
+function batchDomainList() {
+  return [...new Set(document.getElementById('batchDomains').value.split(/[\s,;]+/)
+    .map(s => s.trim().toLowerCase()).filter(s => s.includes('.')))];
+}
+async function setupBatch() {
+  const domains = batchDomainList();
+  if (!domains.length) { alert('Chưa nhập domain nào vào ô danh sách.'); return; }
+  if (!confirm(`Setup ${domains.length} domain:\n${domains.join('\n')}\n\nMỗi domain: check DNS → đổi NS (nếu cần) → áp preset record → email routing.`)) return;
+  log(`Đang setup ${domains.length} domain… (mỗi domain có thể mất ~1 phút)`);
+  const res = await api('/api/setup-batch', { domains });
+  log((res.results || []).map(fmtSteps).join('\n\n'));
+  await refresh();
+}
+async function addBatchToManaged() {
+  const domains = batchDomainList();
+  for (const d of domains) {
+    if (!(STATE.config.domains || []).includes(d)) await api('/api/domains', { domain: d });
+  }
+  await refresh();
+  log(`Đã thêm ${domains.length} domain vào bảng quản lý.`);
+}
+
+// ---------------------------------------------------------------- account tab
+let ACCOUNT_ZONES = [];
+function showDomainTab(which) {
+  document.getElementById('managedTab').style.display = which === 'managed' ? '' : 'none';
+  document.getElementById('accountTab').style.display = which === 'account' ? '' : 'none';
+  document.getElementById('tabManaged').className = which === 'managed' ? '' : 'secondary';
+  document.getElementById('tabAccount').className = which === 'account' ? '' : 'secondary';
+  if (which === 'account' && !ACCOUNT_ZONES.length) loadAccountZones();
+}
+async function loadAccountZones() {
+  const res = await api('/api/account-zones');
+  if (res.error) { alert(res.error); return; }
+  ACCOUNT_ZONES = res.zones || [];
+  renderAccountZones();
+}
+function renderAccountZones() {
+  const q = (document.getElementById('accountSearch').value || '').toLowerCase();
+  const zones = ACCOUNT_ZONES.filter(z => !q || z.name.toLowerCase().includes(q));
+  document.getElementById('accountCount').textContent = zones.length + ' / ' + ACCOUNT_ZONES.length + ' domain';
+  const tb = document.getElementById('accountTable');
+  const managed = new Set(STATE.config.domains || []);
+  tb.innerHTML = zones.length ? zones.map(z => `<tr>
+    <td><b>${esc(z.name)}</b></td>
+    <td><span class="badge ${z.status === 'active' ? 'ok' : 'wait'}">${esc(z.status)}</span></td>
+    <td><span class="mono">${(z.name_servers || []).map(esc).join('<br>')}</span></td>
+    <td>${managed.has(z.name) ? '<span class="muted">đã trong bảng</span>'
+      : `<button class="small secondary" onclick="addZoneToManaged('${esc(z.name)}')">Thêm</button>`}</td>
+  </tr>`).join('') : '<tr><td colspan="4" class="muted">Không tìm thấy domain nào.</td></tr>';
+}
+async function addZoneToManaged(d) {
+  await api('/api/domains', { domain: d });
+  await refresh();
+  renderAccountZones();
+}
 async function saveSettings() {
   const body = {
     cf_token: document.getElementById('cf_token').value.trim(),
@@ -298,12 +489,12 @@ function renderTable() {
   const domains = cfg.domains || [];
   document.getElementById('domainCount').textContent = domains.length + ' domain';
   const tb = document.getElementById('domainTable');
-  if (!domains.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
+  if (!domains.length) { tb.innerHTML = '<tr><td colspan="7" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
   tb.innerHTML = domains.map(d => {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
     const dnsCell = s.error && !zone ? `<span class="badge no">lỗi</span> <span class="muted">${esc(s.error)}</span>`
-      : yesNo(s.ns_ok) + `<br><span class="mono">${esc((s.doh_ns || []).join('<br>')) || ''}</span>`
+      : yesNo(s.ns_ok) + `<br><span class="mono">${(s.doh_ns || []).map(esc).join('<br>') || ''}</span>`
         + (zone ? `<br><span class="muted">zone: ${esc(zone.status)}</span>` : '');
     const recs = s.records || [];
     const recCell = !zone ? '<span class="muted">—</span>'
@@ -316,8 +507,9 @@ function renderTable() {
     const ht = s.https;
     const htCell = !zone ? '<span class="muted">—</span>'
       : ht && ht.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
-      : yesNo(ht && ht.ok) + (ht && ht.ssl ? ` <span class="muted">${esc(ht.ssl)}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
+      : yesNo(ht && ht.ok) + (ht && ht.ssl ? ` <span class="muted">${esc(ht.ssl)}${ht.min_tls ? ' · TLS ' + esc(ht.min_tls) : ''}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
     return `<tr>
+      <td><input type="checkbox" class="row-check" value="${esc(d)}" onchange="updateSelectedCount()"></td>
       <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}</span></td>
       <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td>
       <td style="white-space:nowrap">
@@ -326,6 +518,51 @@ function renderTable() {
         <button class="small warn" onclick="removeDomain('${esc(d)}')">✕</button>
       </td></tr>`;
   }).join('');
+  updateSelectedCount();
+}
+
+// ---------------------------------------------------------------- chon nhieu domain
+function selectedDomains() {
+  return [...document.querySelectorAll('.row-check:checked')].map(c => c.value);
+}
+function toggleCheckAll(on) {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = on);
+  updateSelectedCount();
+}
+function updateSelectedCount() {
+  const n = selectedDomains().length;
+  document.getElementById('selectedCount').textContent =
+    n ? `Đã chọn ${n} domain.` : 'Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.';
+}
+async function setupSelected() {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  if (!confirm(`Setup ${domains.length} domain đã chọn?`)) return;
+  log(`Đang setup ${domains.length} domain…`);
+  const res = await api('/api/setup-batch', { domains });
+  log((res.results || []).map(fmtSteps).join('\n\n'));
+  await refresh();
+}
+async function applyHttpsSelected() {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  const hp = STATE.config.https_preset || {};
+  if (!confirm(`Áp HTTPS (${hp.ssl || 'flexible'} + Always Use HTTPS + TLS ${hp.min_tls_version || '1.2'}) cho ${domains.length} domain đã chọn?`)) return;
+  log(`Đang áp HTTPS cho ${domains.length} domain…`);
+  const res = await api('/api/set-https-batch', { domains });
+  log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓' : 'LỖI: ' + (r.error || '')}`).join('\n'));
+  await refresh();
+}
+async function checkSelected() {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  log(`Đang kiểm tra ${domains.length} domain…`);
+  for (const d of domains) {
+    const res = await api('/api/check', { domain: d });
+    STATE.status = { ...STATE.status, ...res.status };
+  }
+  renderTable();
+  log('Đã kiểm tra xong ' + domains.length + ' domain.');
 }
 
 // ---------------------------------------------------------------- popup Edit
@@ -385,7 +622,8 @@ async function openEdit(d) {
   if (em.error) document.getElementById('editEmailStatus').textContent = 'Lỗi: ' + em.error;
   // HTTPS.
   const ht = det.https || {};
-  document.getElementById('editSsl').value = ht.ssl || 'full';
+  document.getElementById('editSsl').value = ht.ssl || 'flexible';
+  document.getElementById('editMinTls').value = ht.min_tls || '1.2';
   document.getElementById('editAlwaysHttps').checked = ht.always_https === 'on';
   document.getElementById('editRewrites').checked = ht.rewrites === 'on';
 }
@@ -449,7 +687,8 @@ async function saveHttps() {
   const res = await api('/api/set-https', { domain: EDIT_DOMAIN,
     ssl: document.getElementById('editSsl').value,
     always_https: document.getElementById('editAlwaysHttps').checked ? 'on' : 'off',
-    rewrites: document.getElementById('editRewrites').checked ? 'on' : 'off' });
+    rewrites: document.getElementById('editRewrites').checked ? 'on' : 'off',
+    min_tls_version: document.getElementById('editMinTls').value });
   log(res.ok ? `Đã lưu HTTPS cho ${EDIT_DOMAIN}.` : ('Lỗi: ' + (res.error || '')));
   await reloadEdit();
 }

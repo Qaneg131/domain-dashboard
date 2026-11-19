@@ -31,6 +31,27 @@ DEFAULT_CONFIG = {
         ],
     },
     "default_preset": "web",
+    # Email preset — ap trong buoc Setup (sau records). 'info@' = info@<domain>,
+    # '*' = catch-all. 'to' la dia chi nhan that (vd Gmail) — phai nhap
+    # thi buoc email moi chay; dia chi nhan phai duoc xac minh (bam link
+    # trong mail) thi rule moi forward duoc.
+    "email_preset": {
+        "enabled": True,
+        "rules": [
+            {"match": "info@", "to": ""},
+            {"match": "*", "to": ""},
+        ],
+    },
+    # HTTPS preset — ap trong buoc Setup (buoc 5). Mac dinh theo y user:
+    # SSL Flexible (origin chua co chung chi hop le) + Always Use HTTPS bat
+    # + Minimum TLS 1.2 + Auto HTTPS Rewrites bat.
+    "https_preset": {
+        "enabled": True,
+        "ssl": "flexible",
+        "always_https": "on",
+        "min_tls_version": "1.2",
+        "rewrites": "on",
+    },
 }
 
 

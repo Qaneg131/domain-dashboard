@@ -98,6 +98,33 @@ def main():
     ns = call("POST", "/api/sync-ns", {"domain": "welvella.com"})
     assert ns["ok"], ns
     print("SYNC-NS OK:", [(s["step"], s["ok"]) for s in ns["steps"]], flush=True)
+
+    hp = call("POST", "/api/https-preset", {"enabled": True, "ssl": "flexible",
+                                            "always_https": "on",
+                                            "min_tls_version": "1.2",
+                                            "rewrites": "on"})
+    assert hp["ok"] and hp["https_preset"]["ssl"] == "flexible", hp
+    hb = call("POST", "/api/set-https-batch", {"domains": ["welvella.com"]})
+    assert hb["ok"] and hb["results"][0]["https"]["min_tls"] == "1.2", hb
+    print("HTTPS-PRESET + BATCH OK", flush=True)
+
+    az = call("GET", "/api/account-zones")
+    assert "welvella.com" in [z["name"] for z in az["zones"]], az
+    print("ACCOUNT-ZONES OK:", [z["name"] for z in az["zones"]], flush=True)
+
+    ep = call("POST", "/api/email-preset", {"enabled": True, "rules": [
+        {"match": "info@", "to": "owner@gmail.com"},
+        {"match": "*", "to": "owner@gmail.com"}]})
+    assert ep["ok"] and len(ep["email_preset"]["rules"]) == 2, ep
+    print("EMAIL-PRESET OK", flush=True)
+
+    batch = call("POST", "/api/setup-batch", {"domains": ["batch1.com", "batch1.com ", " batch2.com"]})
+    assert len(batch["results"]) == 2, batch  # trung + khoang trang da loai
+    assert all(r["ok"] for r in batch["results"]), batch
+    det3 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    assert det3["email_detail"]["enabled"] is True
+    assert len(det3["email_detail"]["rules"]) == 2, det3["email_detail"]
+    print("SETUP-BATCH OK: 2 domain, moi domain co 2 rule email", flush=True)
     mock.shutdown()
     print("E2E OK")
 

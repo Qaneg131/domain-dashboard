@@ -34,7 +34,8 @@ def _zone_state(zid):
     STATE["email"].setdefault(zid, {"enabled": False, "status": "unconfigured",
                                     "rules": [], "addresses": []})
     STATE["settings"].setdefault(zid, {"ssl": "flexible", "always_use_https": "off",
-                                       "automatic_https_rewrites": "off"})
+                                       "automatic_https_rewrites": "off",
+                                       "min_tls_version": "1.0"})
     STATE["records"].setdefault(zid, [])
 
 
@@ -95,8 +96,13 @@ class MockHandler(BaseHTTPRequestHandler):
                 return
         if p.path.startswith("/client/v4/zones"):
             name = q.get("name", [""])[0]
-            z = STATE["zones"].get(name)
-            self._json(self._cf_ok([z] if z else []))
+            if name:
+                z = STATE["zones"].get(name)
+                self._json(self._cf_ok([z] if z else []))
+            else:
+                # List tat ca zone (tab 'Tat ca trong tai khoan').
+                all_z = list(STATE["zones"].values())
+                self._json(self._cf_ok(all_z, {"page": 1, "total_pages": 1}))
             return
         if p.path == "/xml.response":
             cmd = q.get("Command", [""])[0]
@@ -337,12 +343,14 @@ def main():
     assert cf.get_email_routing(z["id"])["enabled"] is False
     print("  OK", flush=True)
 
-    print("TEST 9: HTTPS settings (get/set ssl + always_use_https)...", flush=True)
+    print("TEST 9: HTTPS settings (get/set ssl + always_use_https + min_tls)...", flush=True)
     https = cf.get_https(z["id"])
     assert https["ssl"] == "flexible" and https["ok"] is False, https
-    cf.set_https(z["id"], ssl="full", always_https="on", rewrites="on")
+    assert https["min_tls"] == "1.0", https
+    cf.set_https(z["id"], ssl="full", always_https="on", rewrites="on", min_tls="1.2")
     https2 = cf.get_https(z["id"])
-    assert https2 == {"ssl": "full", "always_https": "on", "rewrites": "on", "ok": True}, https2
+    assert https2 == {"ssl": "full", "always_https": "on", "rewrites": "on",
+                      "min_tls": "1.2", "ok": True}, https2
     print("  OK", flush=True)
 
     print("TEST 10: check_domain co them email + https...", flush=True)
@@ -350,6 +358,72 @@ def main():
     assert st3["email"] is not None and st3["https"] is not None, st3
     assert st3["https"]["ok"] is True, st3["https"]
     print("  OK:", st3["email"], st3["https"], flush=True)
+
+    print("TEST 11: delete_all_records GIU LAI record Email Routing...", flush=True)
+    z11, _ = cf.get_or_create_zone("test11.com")
+    cf.create_record(z11["id"], "A", "test11.com", "1.11.11.11", True)
+    cf.create_record(z11["id"], "A", "www.test11.com", "1.11.11.11", True)
+    cf.enable_email_routing(z11["id"])  # them 5 record MX/SPF/DKIM
+    assert len(cf.list_records(z11["id"])) == 7
+    deleted = cf.delete_all_records(z11["id"])
+    after = cf.list_records(z11["id"])
+    assert deleted == 2, deleted
+    assert len(after) == 5, after
+    assert all(r["type"] == "MX" or "spf" in r["content"] or "DKIM" in r["content"]
+               for r in after), after
+    print(f"  OK: xoa {deleted} record web, giu lai {len(after)} record email", flush=True)
+
+    print("TEST 12: setup co email preset (2 rule info@ + catch-all)...", flush=True)
+    cfg3 = dict(cfg)
+    cfg3["email_preset"] = {"enabled": True, "rules": [
+        {"match": "info@", "to": "owner@gmail.com"},
+        {"match": "*", "to": "owner@gmail.com"}]}
+    # Reset welvella: tat email + xoa rule truoc.
+    cf.disable_email_routing(z["id"])
+    res5 = dash.setup_domain("welvella.com", "web", cfg3)
+    print("  steps:", [(s["step"], s["ok"]) for s in res5["steps"]], flush=True)
+    assert res5["ok"], res5
+    assert any("info@welvella.com" in s["step"] for s in res5["steps"]), res5["steps"]
+    assert any(s["step"].startswith("Rule *") for s in res5["steps"]), res5["steps"]
+    st4 = dash.check_domain("welvella.com", cfg3)
+    assert st4["email"]["enabled"] is True and st4["email"]["rules"] == 2, st4["email"]
+    print("  OK: email enabled + 2 rule", flush=True)
+
+    print("TEST 13: setup lai — rule da co thi giu, khong tao trung...", flush=True)
+    res6 = dash.setup_domain("welvella.com", "web", cfg3)
+    assert res6["ok"], res6
+    assert sum(1 for s in res6["steps"] if s["detail"] == "da co san") == 2, res6["steps"]
+    assert len(cf.list_email_rules(z["id"])) == 2
+    print("  OK", flush=True)
+
+    print("TEST 14: email preset chua nhap dia chi nhan -> bo qua, van ok...", flush=True)
+    cfg4 = dict(cfg)
+    cfg4["email_preset"] = {"enabled": True, "rules": [{"match": "info@", "to": ""}]}
+    res7 = dash.setup_domain("welvella.com", "web", cfg4)
+    assert res7["ok"], res7
+    assert any("chua nhap dia chi nhan" in s["detail"] for s in res7["steps"]), res7["steps"]
+    print("  OK", flush=True)
+
+    print("TEST 15: list_zones tra het zone trong tai khoan...", flush=True)
+    zones = cf.list_zones()
+    assert {x["name"] for x in zones} >= {"elvellia.com", "welvella.com"}, zones
+    print("  OK:", [x["name"] for x in zones], flush=True)
+
+    print("TEST 16: Setup ap luon HTTPS preset (Flexible + always on + TLS 1.2)...", flush=True)
+    cfg5 = dict(cfg)
+    cfg5["https_preset"] = {"enabled": True, "ssl": "flexible",
+                            "always_https": "on", "min_tls_version": "1.2",
+                            "rewrites": "on"}
+    cfg5["email_preset"] = {"enabled": False, "rules": []}
+    res8 = dash.setup_domain("welvella.com", "web", cfg5)
+    assert res8["ok"], res8
+    assert any(s["step"] == "HTTPS" and s["ok"] for s in res8["steps"]), res8["steps"]
+    st5 = dash.check_domain("welvella.com", cfg5)
+    assert st5["https"]["ssl"] == "flexible", st5["https"]
+    assert st5["https"]["always_https"] == "on", st5["https"]
+    assert st5["https"]["min_tls"] == "1.2", st5["https"]
+    assert st5["https"]["ok"] is True, st5["https"]
+    print("  OK:", st5["https"], flush=True)
 
     srv.shutdown()
     print("ALL TESTS PASSED")
