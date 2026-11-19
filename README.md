@@ -26,6 +26,8 @@ quyền:
 | Zone — Zone Settings — Edit | đọc/bật Email Routing, SSL/HTTPS |
 | Zone — Email Routing Rules — Edit | tạo/xóa rule forward mail |
 | Account — Email Routing Addresses — Edit | thêm địa chỉ nhận mail |
+| Zone — Rulesets — Edit | tạo rule By Pass (Cache Rules) |
+| Zone — Zone — Edit | xóa zone (nút "Xóa zone đã chọn") |
 
 Account ID lấy ở URL dashboard (`dash.cloudflare.com/<account-id>`) — đã điền
 sẵn nếu bạn dùng tài khoản cũ, sửa lại nếu khác.
@@ -55,7 +57,11 @@ NS sẽ báo "chưa cấu hình Namecheap API".
   Setup là chạy từng domain một với đủ các bước trên. Chỉ xử lý đúng các
   domain trong ô này, không động đến domain khác.
 - **Chọn nhiều domain** — tick ô vuông ở đầu mỗi dòng trong bảng quản lý
-  rồi bấm "Setup đã chọn" / "Áp HTTPS đã chọn" / "Kiểm tra đã chọn".
+  rồi bấm "Setup đã chọn" / "Áp record đã chọn" / "Áp HTTPS đã chọn" (chọn
+  SSL Flexible/Full/Full strict ở ô SSL bên cạnh) / "Bypass cache đã chọn"
+  (tạo rule "By Pass" cho mọi request, như trong dashboard Cloudflare) /
+  "Kiểm tra đã chọn". "Xóa zone đã chọn" sẽ XÓA ZONE trên Cloudflare
+  (không khôi phục được) — hỏi xác nhận 2 lần.
 - **Tab "Tất cả trong tài khoản"** — liệt kê hết zone trong tài khoản
   Cloudflare, có ô tìm kiếm, bấm "Thêm" để đưa domain vào bảng quản lý.
 - **Edit (popup)** — bấm Edit ở từng domain để chỉnh 4 mục:
@@ -66,6 +72,7 @@ NS sẽ báo "chưa cấu hình Namecheap API".
     Email Routing sẽ thêm/khóa 3 MX + SPF + DKIM của Cloudflare (ghi đè
     mail cũ); địa chỉ nhận phải bấm link xác minh trong mail thì rule mới
     chạy.
+  - **Cache**: bật/tắt rule "By Pass" (bypass cache cho mọi request).
   - **HTTPS**: SSL mode (Off/Flexible/Full/Full strict), Always Use HTTPS,
     Minimum TLS Version, Auto HTTPS Rewrites. Mặc định khi Setup:
     Flexible + Always Use HTTPS bật + TLS 1.2.

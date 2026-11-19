@@ -26,6 +26,7 @@ STATE = {
     "nc_ns": {},      # domain -> [ns...]
     "email": {},      # zone_id -> {enabled, status, rules:[], addresses:[]}
     "settings": {},   # zone_id -> {ssl, always_use_https, automatic_https_rewrites}
+    "rulesets": {},   # zone_id -> {id, phase, rules:[]} hoac chua co
     "next_id": 1,
 }
 
@@ -93,6 +94,14 @@ class MockHandler(BaseHTTPRequestHandler):
                 name = parts[5]
                 self._json(self._cf_ok({"id": name, "value": STATE["settings"][zid].get(name),
                                         "editable": True}))
+                return
+            if len(parts) == 8 and parts[4] == "rulesets" and parts[5] == "phases" \
+                    and parts[6] == "http_request_cache_settings" and parts[7] == "entrypoint":
+                rs = STATE["rulesets"].get(zid)
+                if rs is None:
+                    self._cf_err("ruleset not found", 404)
+                else:
+                    self._json(self._cf_ok(rs))
                 return
         if p.path.startswith("/client/v4/zones"):
             name = q.get("name", [""])[0]
@@ -201,6 +210,31 @@ class MockHandler(BaseHTTPRequestHandler):
                     em["addresses"].append(addr)
                     self._json(self._cf_ok(addr))
                     return
+            if len(parts) == 5 and parts[4] == "rulesets":
+                rs = {"id": f"rs-{STATE['next_id']}", "name": body.get("name", "default"),
+                      "kind": body.get("kind", "zone"), "phase": body.get("phase"),
+                      "rules": body.get("rules", [])}
+                STATE["next_id"] += 1
+                STATE["rulesets"][zid] = rs
+                self._json(self._cf_ok(rs))
+                return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_PUT(self):
+        p = urllib.parse.urlparse(self.path)
+        n = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(n).decode() or "{}")
+        parts = [x for x in p.path.split("/") if x]
+        if len(parts) == 8 and parts[:3] == ["client", "v4", "zones"] and parts[4] == "rulesets":
+            zid = parts[3]
+            rs = STATE["rulesets"].get(zid)
+            if rs is None:
+                self._cf_err("ruleset not found", 404)
+                return
+            rs["rules"] = body.get("rules", rs["rules"])
+            self._json(self._cf_ok(rs))
+            return
         self.send_response(404)
         self.end_headers()
 
@@ -223,6 +257,15 @@ class MockHandler(BaseHTTPRequestHandler):
         parts = [x for x in p.path.split("/") if x]
         if len(parts) >= 4 and parts[:3] == ["client", "v4", "zones"]:
             zid = parts[3]
+            if len(parts) == 4:
+                # DELETE /zones/{id} — xoa zone + toan bo state lien quan.
+                name = next((k for k, v in STATE["zones"].items() if v["id"] == zid), None)
+                if name:
+                    del STATE["zones"][name]
+                for store in ("email", "settings", "records", "rulesets"):
+                    STATE[store].pop(zid, None)
+                self._json(self._cf_ok({"id": zid}))
+                return
             if len(parts) == 6 and parts[4] == "dns_records":
                 rid = parts[5]
                 STATE["records"][zid] = [r for r in STATE["records"].get(zid, []) if r["id"] != rid]
@@ -424,6 +467,40 @@ def main():
     assert st5["https"]["min_tls"] == "1.2", st5["https"]
     assert st5["https"]["ok"] is True, st5["https"]
     print("  OK:", st5["https"], flush=True)
+
+    print("TEST 17: Cache Rules — By Pass (tao / trung / go)...", flush=True)
+    z2 = cf.get_zone("welvella.com")
+    assert cf.has_cache_bypass(z2["id"]) is False
+    r1 = cf.set_cache_bypass(z2["id"])
+    assert r1["already"] is False
+    assert r1["rule"]["action"] == "set_cache_settings"
+    assert r1["rule"]["action_parameters"] == {"cache": False}
+    assert r1["rule"]["expression"] == "true"
+    assert cf.has_cache_bypass(z2["id"]) is True
+    # Tao lan 2 phai tra already, khong tao trung rule.
+    r2 = cf.set_cache_bypass(z2["id"])
+    assert r2["already"] is True
+    rs = cf.get_cache_ruleset(z2["id"])
+    assert len(rs["rules"]) == 1, rs["rules"]
+    # Them 1 rule khac thu cong roi set bypass lai: rule cu phai con.
+    rs["rules"].append({"action": "set_cache_settings",
+                        "action_parameters": {"cache": True},
+                        "expression": "(http.request.uri.path starts_with \"/static/\")",
+                        "description": "Cache static", "enabled": True})
+    cf._req("PUT", f"/zones/{z2['id']}/rulesets/phases/http_request_cache_settings/entrypoint",
+            {"rules": rs["rules"]})
+    cf.remove_cache_bypass(z2["id"])
+    assert cf.has_cache_bypass(z2["id"]) is False
+    rs2 = cf.get_cache_ruleset(z2["id"])
+    assert len(rs2["rules"]) == 1 and rs2["rules"][0]["description"] == "Cache static", rs2
+    print("  OK", flush=True)
+
+    print("TEST 18: delete_zone...", flush=True)
+    z3, _created = cf.get_or_create_zone("test11.com")
+    assert cf.get_zone("test11.com") is not None
+    cf.delete_zone(z3["id"])
+    assert cf.get_zone("test11.com") is None
+    print("  OK", flush=True)
 
     srv.shutdown()
     print("ALL TESTS PASSED")

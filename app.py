@@ -132,6 +132,11 @@ def check_domain(domain, cfg):
             except Exception as e:
                 st["https"] = {"ssl": None, "always_https": None, "rewrites": None,
                                "ok": False, "error": str(e)}
+            try:
+                st["cache_bypass"] = cf.has_cache_bypass(st["zone"]["id"])
+            except Exception as e:
+                st["cache_bypass"] = None
+                st["cache_error"] = str(e)
     except Exception as e:
         st["error"] = str(e)
     return st
@@ -674,11 +679,14 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self._json({"domain": d, "ok": False, "error": str(e)})
             elif path == "/api/set-https-batch":
-                # Ap HTTPS preset cho NHIEU domain da chon (checkbox o bang).
+                # Ap HTTPS cho NHIEU domain da chon (checkbox o bang).
+                # ssl lay tu body (dropdown o bulk bar) neu co, khong thi
+                # lay tu https_preset; cac cai khac lay tu https_preset.
                 raw = body.get("domains") or []
                 domains = [str(x).strip().lower() for x in raw
                            if str(x).strip() and "." in str(x)]
                 hp = cfg.get("https_preset") or {}
+                ssl = body.get("ssl") or hp.get("ssl")
                 results = []
                 for d in domains:
                     cf, zone, err = _get_zone_or_error(d, cfg)
@@ -686,7 +694,7 @@ class Handler(BaseHTTPRequestHandler):
                         results.append({"domain": d, "ok": False, "error": err})
                         continue
                     try:
-                        out = cf.set_https(zone["id"], ssl=hp.get("ssl"),
+                        out = cf.set_https(zone["id"], ssl=ssl,
                                            always_https=hp.get("always_https"),
                                            rewrites=hp.get("rewrites"),
                                            min_tls=hp.get("min_tls_version"))
@@ -694,6 +702,107 @@ class Handler(BaseHTTPRequestHandler):
                         results.append({"domain": d, "ok": True, "https": out})
                     except Exception as e:
                         results.append({"domain": d, "ok": False, "error": str(e)})
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/apply-records-batch":
+                # Ap preset record cho NHIEU domain da chon (chi record,
+                # khong dong NS/email/HTTPS).
+                raw = body.get("domains") or []
+                domains = [str(x).strip().lower() for x in raw
+                           if str(x).strip() and "." in str(x)]
+                preset = str(body.get("preset") or cfg.get("default_preset", "")).strip()
+                recs = cfg.get("presets", {}).get(preset)
+                if not recs:
+                    self._json({"ok": False, "error": f"preset '{preset}' khong ton tai"})
+                    return
+                results = []
+                for d in domains:
+                    cf, zone, err = _get_zone_or_error(d, cfg)
+                    if err:
+                        results.append({"domain": d, "ok": False, "error": err})
+                        continue
+                    try:
+                        deleted = cf.delete_all_records(zone["id"])
+                        added = 0
+                        for r in recs:
+                            cf.create_record(zone["id"], r["type"].upper(),
+                                             expand_name(d, r.get("name", "")),
+                                             str(r.get("content", "")).strip(),
+                                             bool(r.get("proxied", True)))
+                            added += 1
+                        st[d] = check_domain(d, cfg)
+                        results.append({"domain": d, "ok": True,
+                                        "detail": f"da xoa {deleted} record cu, them {added} record moi"})
+                    except Exception as e:
+                        results.append({"domain": d, "ok": False, "error": str(e)})
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/cache-bypass":
+                d = str(body.get("domain", "")).strip().lower()
+                enable = bool(body.get("enabled", True))
+                cf, zone, err = _get_zone_or_error(d, cfg)
+                if err:
+                    self._json({"domain": d, "ok": False, "error": err})
+                    return
+                try:
+                    if enable:
+                        r = cf.set_cache_bypass(zone["id"])
+                        msg = ("da co rule By Pass roi" if r.get("already")
+                               else "da them rule By Pass (tat ca request bypass cache)")
+                    else:
+                        r = cf.remove_cache_bypass(zone["id"])
+                        msg = ("da go rule By Pass" if r.get("removed")
+                               else "khong co rule By Pass de go")
+                    st[d] = check_domain(d, cfg)
+                    save_status(st)
+                    self._json({"domain": d, "ok": True, "message": msg})
+                except Exception as e:
+                    self._json({"domain": d, "ok": False, "error": str(e)})
+            elif path == "/api/cache-bypass-batch":
+                raw = body.get("domains") or []
+                domains = [str(x).strip().lower() for x in raw
+                           if str(x).strip() and "." in str(x)]
+                enable = bool(body.get("enabled", True))
+                results = []
+                for d in domains:
+                    cf, zone, err = _get_zone_or_error(d, cfg)
+                    if err:
+                        results.append({"domain": d, "ok": False, "error": err})
+                        continue
+                    try:
+                        if enable:
+                            r = cf.set_cache_bypass(zone["id"])
+                            detail = "da co roi" if r.get("already") else "da them rule By Pass"
+                        else:
+                            r = cf.remove_cache_bypass(zone["id"])
+                            detail = "da go rule" if r.get("removed") else "khong co rule"
+                        st[d] = check_domain(d, cfg)
+                        results.append({"domain": d, "ok": True, "detail": detail})
+                    except Exception as e:
+                        results.append({"domain": d, "ok": False, "error": str(e)})
+                save_status(st)
+                self._json({"ok": all(r["ok"] for r in results), "results": results})
+            elif path == "/api/delete-zones-batch":
+                # XOA ZONE tren Cloudflare (khong khoi phuc duoc) + xoa khoi
+                # bang quan ly. Chi chay khi user xac nhan o giao dien.
+                raw = body.get("domains") or []
+                domains = [str(x).strip().lower() for x in raw
+                           if str(x).strip() and "." in str(x)]
+                results = []
+                for d in domains:
+                    cf, zone, err = _get_zone_or_error(d, cfg)
+                    if err:
+                        results.append({"domain": d, "ok": False, "error": err})
+                        continue
+                    try:
+                        cf.delete_zone(zone["id"])
+                        cfg["domains"] = [x for x in cfg["domains"] if x != d]
+                        st.pop(d, None)
+                        results.append({"domain": d, "ok": True,
+                                        "detail": "da xoa zone tren Cloudflare"})
+                    except Exception as e:
+                        results.append({"domain": d, "ok": False, "error": str(e)})
+                save_config(cfg)
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results})
             elif path == "/api/https-preset":

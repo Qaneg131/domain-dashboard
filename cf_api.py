@@ -227,6 +227,92 @@ class CFClient:
                             {"email": email})
         return self._ok(payload)
 
+    # --------------------------------------------------- cache rules (bypass)
+    def get_cache_ruleset(self, zone_id):
+        """Ruleset phase http_request_cache_settings (entrypoint) hoac None
+        neu chua co rule nao. Can quyen Zone Rulesets tren token."""
+        try:
+            payload = self._req(
+                "GET", f"/zones/{zone_id}/rulesets/phases/"
+                       f"http_request_cache_settings/entrypoint")
+            return self._ok(payload)
+        except CFError as e:
+            # Chua co ruleset nao o phase nay -> 404 / 'not found'.
+            if "404" in str(e) or "not found" in str(e).lower():
+                return None
+            raise
+
+    def has_cache_bypass(self, zone_id, name="By Pass"):
+        rs = self.get_cache_ruleset(zone_id)
+        if not rs:
+            return False
+        for r in rs.get("rules") or []:
+            ap = r.get("action_parameters") or {}
+            if (r.get("action") == "set_cache_settings"
+                    and ap.get("cache") is False
+                    and (r.get("description") == name
+                         or r.get("expression") == "true")):
+                return True
+        return False
+
+    def set_cache_bypass(self, zone_id, name="By Pass"):
+        """Them rule Bypass cache cho MOI request (nhu anh dashboard:
+        rule 'By Pass', All incoming requests, Cache eligibility: Bypass).
+        PUT thay the toan bo ruleset nen GET truoc roi gop — khong xoa
+        rule cu. Rule da co thi khong tao trung."""
+        rs = self.get_cache_ruleset(zone_id)
+        rules = list((rs or {}).get("rules") or [])
+        for r in rules:
+            ap = r.get("action_parameters") or {}
+            if (r.get("action") == "set_cache_settings"
+                    and ap.get("cache") is False
+                    and (r.get("description") == name
+                         or r.get("expression") == "true")):
+                return {"already": True, "rule": r}
+        new_rule = {"action": "set_cache_settings",
+                    "action_parameters": {"cache": False},
+                    "expression": "true",
+                    "description": name,
+                    "enabled": True}
+        rules.append(new_rule)
+        if rs:
+            payload = self._req(
+                "PUT", f"/zones/{zone_id}/rulesets/phases/"
+                       f"http_request_cache_settings/entrypoint",
+                {"rules": rules})
+            self._ok(payload)
+        else:
+            payload = self._req("POST", f"/zones/{zone_id}/rulesets",
+                                {"name": "default", "kind": "zone",
+                                 "phase": "http_request_cache_settings",
+                                 "rules": rules})
+            self._ok(payload)
+        return {"already": False, "rule": new_rule}
+
+    def remove_cache_bypass(self, zone_id, name="By Pass"):
+        rs = self.get_cache_ruleset(zone_id)
+        if not rs:
+            return {"removed": False}
+        rules = [r for r in (rs.get("rules") or [])
+                 if not (r.get("action") == "set_cache_settings"
+                         and (r.get("action_parameters") or {}).get("cache") is False
+                         and (r.get("description") == name
+                              or r.get("expression") == "true"))]
+        if len(rules) == len(rs.get("rules") or []):
+            return {"removed": False}
+        payload = self._req(
+            "PUT", f"/zones/{zone_id}/rulesets/phases/"
+                   f"http_request_cache_settings/entrypoint",
+            {"rules": rules})
+        self._ok(payload)
+        return {"removed": True}
+
+    # --------------------------------------------------- xoa zone
+    def delete_zone(self, zone_id):
+        """Xoa zone tren Cloudflare (khong khoi phuc duoc)."""
+        payload = self._req("DELETE", f"/zones/{zone_id}")
+        return self._ok(payload)
+
 
 def _is_email_routing_record(r):
     """Record do Email Routing tao/khoa (khong thuoc preset web)."""

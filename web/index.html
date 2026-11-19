@@ -152,12 +152,20 @@
     <div class="row" id="bulkBar">
       <span class="muted" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
       <button class="secondary small" onclick="setupSelected()">Setup đã chọn</button>
+      <button class="secondary small" onclick="applyRecordsSelected()">Áp record đã chọn</button>
+      <label>SSL</label>
+      <select id="bulkSsl">
+        <option value="flexible">Flexible</option><option value="full">Full</option>
+        <option value="strict">Full (strict)</option>
+      </select>
       <button class="secondary small" onclick="applyHttpsSelected()">Áp HTTPS đã chọn</button>
+      <button class="secondary small" onclick="bypassCacheSelected(true)">Bypass cache đã chọn</button>
+      <button class="warn small" onclick="deleteZonesSelected()">Xóa zone đã chọn</button>
       <button class="secondary small" onclick="checkSelected()">Kiểm tra đã chọn</button>
     </div>
     <table>
-      <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th></th></tr></thead>
-      <tbody id="domainTable"><tr><td colspan="7" class="muted">Đang tải…</td></tr></tbody>
+      <thead><tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th>Name</th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr></thead>
+      <tbody id="domainTable"><tr><td colspan="8" class="muted">Đang tải…</td></tr></tbody>
     </table>
     </div>
     <div id="accountTab" style="display:none">
@@ -222,6 +230,13 @@
       <input type="text" id="editDestEmail" placeholder="email nhận cần xác minh" style="max-width:230px">
       <button class="secondary small" onclick="addEmailAddress()">Gửi mail xác minh</button>
       <span class="muted" id="editEmailMsg"></span>
+    </div>
+
+    <h3>Cache</h3>
+    <div class="row">
+      <label style="min-width:0"><input type="checkbox" id="editCacheBypass"> Bypass cache (rule "By Pass" — mọi request đều về thẳng origin, không cache)</label>
+      <button onclick="saveCacheBypass()">Lưu Cache</button>
+      <span class="muted" id="editCacheMsg"></span>
     </div>
 
     <h3>HTTPS</h3>
@@ -389,6 +404,8 @@ function renderHttpsPreset() {
   document.getElementById('httpsPresetTls').value = hp.min_tls_version || '1.2';
   document.getElementById('httpsPresetAlways').checked = hp.always_https !== 'off';
   document.getElementById('httpsPresetRewrites').checked = hp.rewrites !== 'off';
+  const bulk = document.getElementById('bulkSsl');
+  if (bulk) bulk.value = hp.ssl || 'flexible';
 }
 async function saveHttpsPreset() {
   const body = {
@@ -489,7 +506,7 @@ function renderTable() {
   const domains = cfg.domains || [];
   document.getElementById('domainCount').textContent = domains.length + ' domain';
   const tb = document.getElementById('domainTable');
-  if (!domains.length) { tb.innerHTML = '<tr><td colspan="7" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
+  if (!domains.length) { tb.innerHTML = '<tr><td colspan="8" class="muted">Chưa có domain — thêm ở trên.</td></tr>'; return; }
   tb.innerHTML = domains.map(d => {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
@@ -508,10 +525,14 @@ function renderTable() {
     const htCell = !zone ? '<span class="muted">—</span>'
       : ht && ht.error ? `<span class="badge no">No</span> <span class="muted">cần quyền token</span>`
       : yesNo(ht && ht.ok) + (ht && ht.ssl ? ` <span class="muted">${esc(ht.ssl)}${ht.min_tls ? ' · TLS ' + esc(ht.min_tls) : ''}${ht.always_https === 'on' ? ' + always-https' : ''}</span>` : '');
+    const cacheCell = !zone ? '<span class="muted">—</span>'
+      : s.cache_bypass === true ? '<span class="badge ok">By Pass</span>'
+      : s.cache_bypass === false ? '<span class="badge no">No</span>'
+      : '<span class="muted">cần quyền token</span>';
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${esc(d)}" onchange="updateSelectedCount()"></td>
       <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}</span></td>
-      <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td>
+      <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td><td>${cacheCell}</td>
       <td style="white-space:nowrap">
         <button class="small secondary" onclick="openEdit('${esc(d)}')">Edit</button>
         <button class="small" onclick="setupOne('${esc(d)}')">Setup</button>
@@ -547,10 +568,40 @@ async function applyHttpsSelected() {
   const domains = selectedDomains();
   if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
   const hp = STATE.config.https_preset || {};
-  if (!confirm(`Áp HTTPS (${hp.ssl || 'flexible'} + Always Use HTTPS + TLS ${hp.min_tls_version || '1.2'}) cho ${domains.length} domain đã chọn?`)) return;
+  const ssl = document.getElementById('bulkSsl').value;
+  if (!confirm(`Áp HTTPS (SSL ${ssl} + Always Use HTTPS + TLS ${hp.min_tls_version || '1.2'}) cho ${domains.length} domain đã chọn?`)) return;
   log(`Đang áp HTTPS cho ${domains.length} domain…`);
-  const res = await api('/api/set-https-batch', { domains });
+  const res = await api('/api/set-https-batch', { domains, ssl });
   log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓' : 'LỖI: ' + (r.error || '')}`).join('\n'));
+  await refresh();
+}
+async function applyRecordsSelected() {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  const preset = STATE.config.default_preset || 'web';
+  if (!confirm(`Áp preset record "${preset}" cho ${domains.length} domain đã chọn? (xóa hết record cũ của từng domain rồi thêm mới)`)) return;
+  log(`Đang áp preset "${preset}" cho ${domains.length} domain…`);
+  const res = await api('/api/apply-records-batch', { domains, preset });
+  log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓ — ' + (r.detail || '') : 'LỖI: ' + (r.error || '')}`).join('\n'));
+  await refresh();
+}
+async function bypassCacheSelected(enable) {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  if (!confirm(`${enable ? 'Thêm' : 'Gỡ'} rule By Pass (bypass cache mọi request) cho ${domains.length} domain đã chọn?`)) return;
+  log(`Đang ${enable ? 'thêm' : 'gỡ'} rule By Pass cho ${domains.length} domain…`);
+  const res = await api('/api/cache-bypass-batch', { domains, enabled: enable });
+  log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'XONG ✓ — ' + (r.detail || '') : 'LỖI: ' + (r.error || '')}`).join('\n'));
+  await refresh();
+}
+async function deleteZonesSelected() {
+  const domains = selectedDomains();
+  if (!domains.length) { alert('Chưa chọn domain nào.'); return; }
+  if (!confirm(`XÓA ZONE trên Cloudflare cho ${domains.length} domain?\n${domains.join('\n')}\n\nKhông khôi phục được! Domain sẽ mất khỏi Cloudflare (DNS, record, email, HTTPS...).`)) return;
+  if (!confirm(`Chắc chắn xóa ${domains.length} zone? Bấm OK để xóa thật.`)) return;
+  log(`Đang xóa ${domains.length} zone…`);
+  const res = await api('/api/delete-zones-batch', { domains });
+  log((res.results || []).map(r => `${r.domain} — ${r.ok ? 'ĐÃ XÓA ✓' : 'LỖI: ' + (r.error || '')}`).join('\n'));
   await refresh();
 }
 async function checkSelected() {
@@ -620,6 +671,10 @@ async function openEdit(d) {
         <button class="secondary small" onclick="deleteEmailRule('${esc(r.id)}')">Xóa</button></div>`;
     }).join('') || '<span class="muted">Chưa có rule nào.</span>';
   if (em.error) document.getElementById('editEmailStatus').textContent = 'Lỗi: ' + em.error;
+  // Cache.
+  document.getElementById('editCacheBypass').checked = det.cache_bypass === true;
+  document.getElementById('editCacheMsg').textContent =
+    det.cache_bypass === true ? 'Đang bật By Pass' : det.cache_bypass === false ? 'Đang tắt' : '';
   // HTTPS.
   const ht = det.https || {};
   document.getElementById('editSsl').value = ht.ssl || 'flexible';
@@ -682,6 +737,13 @@ async function addEmailAddress() {
   if (!email) return;
   const res = await api('/api/email-address', { domain: EDIT_DOMAIN, email });
   document.getElementById('editEmailMsg').textContent = res.ok ? res.message : ('Lỗi: ' + (res.error || ''));
+}
+async function saveCacheBypass() {
+  const enabled = document.getElementById('editCacheBypass').checked;
+  const res = await api('/api/cache-bypass', { domain: EDIT_DOMAIN, enabled });
+  document.getElementById('editCacheMsg').textContent = res.ok ? res.message : ('Lỗi: ' + (res.error || ''));
+  log(res.ok ? res.message : ('Lỗi: ' + (res.error || '')));
+  await reloadEdit();
 }
 async function saveHttps() {
   const res = await api('/api/set-https', { domain: EDIT_DOMAIN,

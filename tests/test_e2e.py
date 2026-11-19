@@ -125,6 +125,29 @@ def main():
     assert det3["email_detail"]["enabled"] is True
     assert len(det3["email_detail"]["rules"]) == 2, det3["email_detail"]
     print("SETUP-BATCH OK: 2 domain, moi domain co 2 rule email", flush=True)
+
+    # Bulk edit: By Pass cache + ap record + HTTPS Full + xoa zone.
+    cb = call("POST", "/api/cache-bypass-batch", {"domains": ["batch1.com", "batch2.com"], "enabled": True})
+    assert cb["ok"] and all(r["ok"] for r in cb["results"]), cb
+    det4 = call("POST", "/api/domain-detail", {"domain": "batch1.com"})
+    assert det4["cache_bypass"] is True, det4
+    cb2 = call("POST", "/api/cache-bypass-batch", {"domains": ["batch1.com"], "enabled": True})
+    assert cb2["results"][0]["detail"] == "da co roi", cb2
+    print("CACHE-BYPASS-BATCH OK (tao lan 2 khong trung)", flush=True)
+
+    ar = call("POST", "/api/apply-records-batch", {"domains": ["batch1.com"], "preset": "web"})
+    assert ar["ok"] and "da xoa" in ar["results"][0]["detail"], ar
+    print("APPLY-RECORDS-BATCH OK:", ar["results"][0]["detail"], flush=True)
+
+    hs = call("POST", "/api/set-https-batch", {"domains": ["batch1.com"], "ssl": "full"})
+    assert hs["ok"] and hs["results"][0]["https"]["ssl"] == "full", hs
+    print("SET-HTTPS-BATCH SSL OVERRIDE OK: full", flush=True)
+
+    dz = call("POST", "/api/delete-zones-batch", {"domains": ["batch2.com"]})
+    assert dz["ok"] and dz["results"][0]["ok"], dz
+    st2 = call("GET", "/api/state")
+    assert "batch2.com" not in st2["config"]["domains"], st2["config"]["domains"]
+    print("DELETE-ZONES-BATCH OK: batch2.com da xoa khoi bang", flush=True)
     mock.shutdown()
     print("E2E OK")
 
