@@ -85,6 +85,24 @@ def main():
     # Sua lai 1 record thi luu duoc.
     assert call("POST", "/api/presets", {"name": "shop-copy", "records": [
         {"type": "A", "name": "@", "content": "3.3.3.3", "proxied": True}]})["ok"]
+
+    # Sheet rules: them / doi ten (khong can xoa tao lai) / trung ten bi tu choi / xoa.
+    rules0 = call("GET", "/api/state")["config"]["sheet_rules"]
+    assert rules0 == [{"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
+                      {"name": "Web Thuần Long", "preset": "Web Anh Long"}], rules0
+    # (preset trong E2E chi co web/shop/shop-copy nen rule moi dung 'shop'/'web'.)
+    r1 = call("POST", "/api/sheet-rule", {"name": "Web Thuần", "preset": "shop"})
+    assert r1["ok"] and len(r1["rules"]) == 3, r1
+    r2 = call("POST", "/api/sheet-rule", {"index": 2, "name": "Web Thuần Mới", "preset": "web"})
+    assert r2["ok"] and r2["rules"][2] == {"name": "Web Thuần Mới", "preset": "web"}, r2
+    try:
+        call("POST", "/api/sheet-rule", {"name": "Web Thuần Hân", "preset": "shop"})
+        raise AssertionError("duplicate rule name should be rejected")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    r3 = call("POST", "/api/sheet-rule-delete", {"index": 2})
+    assert r3["ok"] and len(r3["rules"]) == 2, r3
+    print("SHEET-RULES OK: them/doi ten/trung ten bi tu choi/xoa", flush=True)
     res2 = call("POST", "/api/apply-preset", {"domain": "welvella.com", "preset": "shop"})
     print("APPLY shop:", res2["ok"], res2["steps"][0]["detail"], flush=True)
     assert res2["ok"], res2

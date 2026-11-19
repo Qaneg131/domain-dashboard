@@ -1059,6 +1059,83 @@ def main():
     assert cf.list_records(z40b["id"]) == [], cf.list_records(z40b["id"])
     print("  OK", flush=True)
 
+    print("TEST 41: Google Sheet — doc B/H/J tu start_row, map rule, setup tung hang + ghi cot J...", flush=True)
+    cfg41 = dict(cfg)
+    cfg41["presets"] = {
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "134.209.163.195", "proxied": True},
+                        {"type": "A", "name": "www", "content": "134.209.163.195", "proxied": True}],
+        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}],
+    }
+    cfg41["default_preset"] = "Web Chị Hân"
+    cfg41["sheet_rules"] = [
+        {"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
+        {"name": "Web Thuần Long", "preset": "Web Anh Long"},
+    ]
+    cfg41["sheet_start_row"] = 1402
+    cfg41["sheet_csv_url"] = "http://example.invalid/sheet.csv"
+    cfg41["sheet_review"] = []
+    cfg41["sheet_ignored"] = []
+    def fake_csv(url):
+        assert url == cfg41["sheet_csv_url"], url
+        rows = [["", "Tên Domain", "Hạn Domain", "DaysLeft", "LLC", "Address",
+                 "Số lần làm lại web", "Loại web", "Tên Dev", "Đã hoàn thành"]]
+        while len(rows) < 1401:
+            rows.append([""] * 12)
+        def mk(domain, loai, j):
+            r = [""] * 12
+            r[1] = domain; r[7] = loai; r[9] = j
+            return r
+        rows.append(mk("stylenora.com", "Web Thuần Hân", "Cần set up"))   # 1402
+        rows.append(mk("vellvyn.com", "Web Thuần Hân", ""))                # 1403 bo qua (J trong)
+        rows.append(mk("vallisse.com", "Web Thuần Hân", "đã set up"))       # 1404 skip
+        rows.append(mk("conflict41.com", "Web Thuần Long", "Cần set up"))   # 1405 review
+        rows.append(mk("unmapped41.com", "Web Thuần", "Cần set up"))        # 1406 skip (chua co rule)
+        rows.append(mk("stylenora.com", "Web Thuần Hân", "Cần set up"))    # 1407 trung, giu dong cuoi
+        return rows
+    dash._sheet_fetch_csv = fake_csv
+    # conflict41.com dang dung 'Web Chi Han' (se xung dot voi 'Web Anh Long' trong sheet).
+    z41, _c = cf.get_or_create_zone("conflict41.com")
+    cf.create_record(z41["id"], "A", "conflict41.com", "134.209.163.195", True)
+    cf.create_record(z41["id"], "A", "www.conflict41.com", "134.209.163.195", True)
+    st41 = {}
+    dash._save_check_result(st41, "conflict41.com",
+                            dash.check_domain("conflict41.com", cfg41, skip_nc=True))
+    assert st41["conflict41.com"].get("records_preset") == "Web Chị Hân", st41
+    rows41, err41 = dash.sheet_read_rows(cfg41)
+    assert not err41, err41
+    by41 = {r["domain"]: r for r in rows41}
+    assert set(by41) == {"stylenora.com", "vallisse.com", "conflict41.com", "unmapped41.com"}, by41
+    assert by41["stylenora.com"]["row"] == 1407, by41["stylenora.com"]  # trung -> giu dong cuoi
+    cls41 = dash._sheet_classify(rows41, cfg41, st41)
+    act41 = {r["domain"]: r["action"] for r in cls41}
+    assert act41 == {"stylenora.com": "setup", "vallisse.com": "skip",
+                     "conflict41.com": "review", "unmapped41.com": "skip"}, act41
+    # Rule doi ten duoc: _sheet_preset_for doc tu cfg (khong cung SHEET_MAP).
+    assert dash._sheet_preset_for("Web Thuần Hân", cfg41) == "Web Chị Hân"
+    cfg41["sheet_rules"][0] = {"name": "Web Thuần Hân Mới", "preset": "Web Anh Long"}
+    assert dash._sheet_preset_for("Web Thuần Hân", cfg41) is None
+    assert dash._sheet_preset_for("Web Thuần Hân Mới", cfg41) == "Web Anh Long"
+    cfg41["sheet_rules"][0] = {"name": "Web Thuần Hân", "preset": "Web Chị Hân"}
+    # Setup 1 hang: stylenora.com (clean) -> xong + ghi 'da set up' ve cot J (mock).
+    STATE["nc_ns"]["stylenora.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    written = []
+    def fake_write(row, value, cfg):
+        written.append((row, value))
+        return True, "ok"
+    dash.sheet_write_status = fake_write
+    one41 = dash._sheet_setup_one("stylenora.com", 1407, "Web Chị Hân", cfg41, st41)
+    assert one41["action"] == "done", one41
+    assert written == [(1407, "đã set up")], written
+    z41b, _c = cf.get_or_create_zone("stylenora.com")
+    assert any(x["type"] == "A" and x["content"] == "134.209.163.195"
+               for x in cf.list_records(z41b["id"])), cf.list_records(z41b["id"])
+    # Batch: conflict vao hang cho duyet, unmapped/vallisse skip, stylenora setup lai (da co preset).
+    res41 = dash.sheet_setup_clean(cfg41, st41)
+    assert res41["ok"], res41
+    assert [q["domain"] for q in res41["queued"]] == ["conflict41.com"], res41
+    assert any(q["domain"] == "conflict41.com" for q in cfg41["sheet_review"]), cfg41["sheet_review"]
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

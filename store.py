@@ -55,6 +55,27 @@ DEFAULT_CONFIG = {
         "min_tls_version": "1.2",
         "rewrites": "on",
     },
+    # Google Sheet — doc CSV publish (chi doc 3 cot B/H/J tu start_row
+    # tro xuong). Ghi lai cot J ("da set up") can Sheets API + service
+    # account: sheet_id = ID trong link edit cua sheet, sa_key = duong
+    # dan file JSON key cua service account (da duoc share sheet quyen
+    # Editor). Can them: pip install google-auth.
+    "sheet_csv_url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZX8sJDgllzfV8ZVHeQ8LV6AWmq_y97dy_nBmrlTcoNw2c87NZJM14_cvCXMoBGiuY4_fM8NB45CJ2/pub?gid=724861620&single=true&output=csv",
+    "sheet_start_row": 1402,
+    "sheet_id": "",
+    "sheet_sa_key": "",
+    # Rule map cot H "Loai web" (ten trong sheet) sang preset record.
+    # User them/sua/xoa/doi ten tuy y o muc Google Sheet — khong can xoa
+    # tao lai. Mac dinh: Web Thuan Han -> Web Chi Han, Web Thuan Long ->
+    # Web Anh Long.
+    "sheet_rules": [
+        {"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
+        {"name": "Web Thuần Long", "preset": "Web Anh Long"},
+    ],
+    # Hang cho duyet (domain xung dot preset: sheet muon preset khac voi
+    # preset domain dang dung) + domain da tu choi (khong dua lai nua).
+    "sheet_review": [],
+    "sheet_ignored": [],
 }
 
 

@@ -679,6 +679,255 @@ def apply_preset(domain, preset_name, cfg):
             {"step": f"Ap preset '{preset_name}'", "ok": False, "detail": str(e)}]}
 
 
+# --- Google Sheet (doc CSV publish, chi 3 cot B/H/J) ---
+# Map cot H "Loai web" sang preset record — cau hinh duoc qua
+# cfg["sheet_rules"] = [{name, preset}]; user them/sua/xoa doi ten tuy y
+# (khong can xoa tao lai). "Web Thuan" (khong ghi Han/Long) chua co rule
+# mac dinh nen se bo qua cho den khi user them rule cho no.
+DEFAULT_SHEET_RULES = [
+    {"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
+    {"name": "Web Thuần Long", "preset": "Web Anh Long"},
+]
+
+
+def _sheet_preset_for(loai, cfg):
+    """Preset ung voi gia tri cot H, theo rule user da cau hinh."""
+    for r in cfg.get("sheet_rules") or DEFAULT_SHEET_RULES:
+        if (r.get("name") or "").strip() == (loai or "").strip():
+            return r.get("preset")
+    return None
+# Chi xu ly 2 gia tri nay o cot J — cac gia tri khac ("Can check web",
+# "Da hoan thanh", trong...) thi bo qua.
+SHEET_WANT = ("cần set up", "đã set up")
+
+
+def _sheet_fetch_csv(url):
+    """Tai CSV publish ve, tra ve list cac row (list of str)."""
+    import csv
+    import io
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        text = r.read().decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(text)))
+
+
+def sheet_read_rows(cfg):
+    """Doc sheet tu start_row tro xuong, chi lay B (domain), H (loai web),
+    J (trang thai). Chi giu cac dong co J = 'can set up' hoac 'da set up'
+    (so sanh khong phan biet hoa/thuong). Trung domain thi giu dong CUOI
+    (moi nhat). Tra ve (rows, error) — rows: [{row, domain, loai, preset,
+    status_j}]."""
+    url = (cfg.get("sheet_csv_url") or "").strip()
+    if not url:
+        return [], "chưa nhập link CSV publish của sheet"
+    try:
+        start = int(cfg.get("sheet_start_row") or 1)
+    except (TypeError, ValueError):
+        start = 1
+    try:
+        all_rows = _sheet_fetch_csv(url)
+    except Exception as e:
+        return [], f"không tải được sheet: {e}"
+    by_domain = {}
+    for idx, r in enumerate(all_rows):
+        row_no = idx + 1
+        if row_no < start or len(r) <= 9:
+            continue
+        domain = (r[1] or "").strip().lower()
+        if not domain or "." not in domain:
+            continue
+        status_j = (r[9] or "").strip()
+        if status_j.lower() not in SHEET_WANT:
+            continue
+        loai = (r[7] or "").strip()
+        by_domain[domain] = {"row": row_no, "domain": domain, "loai": loai,
+                             "preset": None,  # gan sau o _sheet_classify
+                             "status_j": status_j}
+    return list(by_domain.values()), ""
+
+
+def _sheet_current_preset(domain, cfg, st):
+    """Preset hien tai cua domain (tu status da luu; chua co thi check moi
+    va luu lai). Tra ve ten preset hoac None (chua dung preset nao)."""
+    s = (st or {}).get(domain) or {}
+    if s.get("records_preset"):
+        return s["records_preset"]
+    if s and not s.get("error"):
+        return None  # da check day du ma khong khop preset nao
+    try:
+        new = check_domain(domain, cfg, skip_nc=True)
+        _save_check_result(st, domain, new)
+        return new.get("records_preset")
+    except Exception:
+        return None
+
+
+def _sa_access_token(cfg):
+    """Lay access token tu service account JSON (google-auth)."""
+    from google.oauth2 import service_account
+    key_path = (cfg.get("sheet_sa_key") or "").strip()
+    if not key_path:
+        raise RuntimeError("chưa nhập đường dẫn file JSON key của service account")
+    import os
+    if not os.path.exists(key_path):
+        raise RuntimeError(f"không thấy file key: {key_path}")
+    creds = service_account.Credentials.from_service_account_file(
+        key_path, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    from google.auth.transport.requests import Request
+    creds.refresh(Request())
+    return creds.token
+
+
+def sheet_write_status(row, value, cfg):
+    """Ghi gia tri vao cot J (cot 10) cua dong row trong sheet, qua Sheets
+    API (can sheet_id + service account da duoc share quyen Editor).
+    Tra ve (ok, detail)."""
+    sheet_id = (cfg.get("sheet_id") or "").strip()
+    if not sheet_id:
+        return False, "chưa nhập Sheet ID (ID trong link edit của sheet)"
+    try:
+        token = _sa_access_token(cfg)
+    except ImportError:
+        return False, "chưa cài thư viện google-auth — chạy: pip install google-auth"
+    except Exception as e:
+        return False, str(e)
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    # Ten tab: tim theo gid trong link CSV, mac dinh tab dau tien.
+    gid = None
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(
+        cfg.get("sheet_csv_url") or "").query)
+    if q.get("gid"):
+        try:
+            gid = int(q["gid"][0])
+        except ValueError:
+            gid = None
+    tab = None
+    try:
+        req = urllib.request.Request(
+            "https://sheets.googleapis.com/v4/spreadsheets/" + sheet_id,
+            headers={"Authorization": "Bearer " + token})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            meta = _json.loads(r.read().decode())
+        sheets = meta.get("sheets") or []
+        if gid is not None:
+            for sh in sheets:
+                if sh.get("properties", {}).get("sheetId") == gid:
+                    tab = sh["properties"].get("title")
+                    break
+        if not tab and sheets:
+            tab = sheets[0].get("properties", {}).get("title")
+    except Exception as e:
+        return False, f"không đọc được danh sách tab: {e}"
+    if not tab:
+        return False, "không tìm được tab nào trong sheet"
+    # Ten tab luon boc trong dau ' (thoat ' bang ''), hop le ca khi khong co khoang trang.
+    disp = "'" + tab.replace("'", "''") + "'"
+    rng = f"{disp}!J{row}"
+    body = _json.dumps({"range": rng, "majorDimension": "ROWS",
+                        "values": [[value]]}).encode()
+    url = ("https://sheets.googleapis.com/v4/spreadsheets/" + sheet_id +
+           "/values/" + urllib.parse.quote(rng) + "?valueInputOption=RAW")
+    try:
+        req = urllib.request.Request(
+            url, data=body, method="PUT",
+            headers={"Authorization": "Bearer " + token,
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            _json.loads(r.read().decode())
+        return True, f"đã ghi '{value}' vào {rng}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _sheet_classify(rows, cfg, st):
+    """Gan hanh dong cho moi dong sheet: 'setup' (clean, se tu setup),
+    'review' (xung dot preset -> cho duyet), 'skip' (da set up / chua map
+    preset / da tu choi). Tra ve rows da gan 'action' + 'detail'."""
+    ignored = set(cfg.get("sheet_ignored") or [])
+    out = []
+    for r in rows:
+        d = r["domain"]
+        r = dict(r)
+        r["preset"] = _sheet_preset_for(r.get("loai"), cfg)
+        if r["status_j"].lower() == "đã set up":
+            r["action"], r["detail"] = "skip", "đã set up rồi"
+        elif d in ignored:
+            r["action"], r["detail"] = "skip", "đã từ chối trước đó"
+        elif not r["preset"]:
+            r["action"] = "skip"
+            r["detail"] = (f"Loại web '{r['loai']}' chưa map sang preset nào"
+                           if r["loai"] else "chưa ghi Loại web")
+        else:
+            cur = _sheet_current_preset(d, cfg, st)
+            if cur and cur != r["preset"]:
+                r["action"] = "review"
+                r["detail"] = f"đang dùng '{cur}', sheet muốn '{r['preset']}'"
+                r["current"] = cur
+            else:
+                r["action"] = "setup"
+                r["detail"] = ("chưa có preset — sẽ setup theo "
+                               f"'{r['preset']}'" if not cur else
+                               f"đã đúng preset '{r['preset']}'")
+        out.append(r)
+    return out
+
+
+def _sheet_setup_one(domain, row, preset, cfg, st):
+    """Setup 1 dong sheet: chay setup_domain, neu ok thi ghi 'da set up'
+    ve cot J cua dong do. Tra ve {domain, row, preset, action, detail}."""
+    res = setup_domain(domain, preset, cfg)
+    _save_check_result(st, domain, check_domain(domain, cfg, skip_nc=True))
+    if res.get("ok"):
+        ok_w, det_w = sheet_write_status(row, "đã set up", cfg)
+        return {"domain": domain, "row": row, "preset": preset,
+                "action": "done",
+                "detail": ("setup xong" if ok_w else
+                           f"setup xong — NHƯNG ghi sheet lỗi: {det_w}")}
+    bad = [f"{s['step']}: {s.get('detail', '')}"
+           for s in res.get("steps", []) if not s.get("ok")]
+    return {"domain": domain, "row": row, "preset": preset,
+            "action": "error",
+            "detail": "setup lỗi — " + ("; ".join(bad) if bad else "xem log")}
+
+
+def sheet_setup_clean(cfg, st):
+    """Doc sheet, setup tuan tu tung dong 'can set up' ma clean (xong 1
+    moi qua dong sau, loi cung qua dong sau), ghi 'da set up' ve cot J
+    khi xong. Domain xung dot thi dua vao hang cho duyet.
+    Tra ve {ok, results:[{domain,row,preset,action,detail}], queued}.
+    Luu config (hang cho duyet) + status."""
+    rows, err = sheet_read_rows(cfg)
+    if err:
+        return {"ok": False, "error": err}
+    rows = _sheet_classify(rows, cfg, st)
+    results, queued = [], []
+    review = cfg.setdefault("sheet_review", [])
+    for r in rows:
+        d = r["domain"]
+        if r["action"] == "review":
+            q = {"domain": d, "row": r["row"], "preset": r["preset"],
+                 "current": r.get("current"), "loai": r["loai"]}
+            if q not in review:
+                review.append(q)
+            queued.append(q)
+            results.append({"domain": d, "row": r["row"],
+                            "preset": r["preset"], "action": "review",
+                            "detail": r["detail"]})
+            continue
+        if r["action"] != "setup":
+            results.append({"domain": d, "row": r["row"],
+                            "preset": r["preset"], "action": "skip",
+                            "detail": r["detail"]})
+            continue
+        results.append(_sheet_setup_one(d, r["row"], r["preset"], cfg, st))
+    save_config(cfg)
+    save_status(st)
+    return {"ok": True, "results": results, "queued": queued}
+
+
 _WRITE_MARKS = ("da tao", "da cap nhat", "da them", "da xoa")
 
 
@@ -1420,6 +1669,117 @@ class Handler(BaseHTTPRequestHandler):
                     cfg["default_preset"] = name
                     save_config(cfg)
                 self._json({"ok": True, "default_preset": cfg.get("default_preset")})
+            elif path == "/api/sheet-settings":
+                # Luu cau hinh Google Sheet (link CSV, dong bat dau, Sheet ID,
+                # duong dan file JSON key service account).
+                if "csv_url" in body:
+                    cfg["sheet_csv_url"] = str(body.get("csv_url") or "").strip()
+                if "start_row" in body:
+                    try:
+                        cfg["sheet_start_row"] = int(body.get("start_row"))
+                    except (TypeError, ValueError):
+                        pass
+                if "sheet_id" in body:
+                    cfg["sheet_id"] = str(body.get("sheet_id") or "").strip()
+                if "sa_key" in body:
+                    cfg["sheet_sa_key"] = str(body.get("sa_key") or "").strip()
+                save_config(cfg)
+                self._json({"ok": True})
+            elif path == "/api/sheet-rule":
+                # Them rule moi hoac sua rule cu (doi ten duoc, khong can
+                # xoa tao lai): gui {index} de sua rule o vi tri do, khong
+                # gui index thi them moi. {name, preset} bat buoc.
+                name = str(body.get("name", "")).strip()
+                preset = str(body.get("preset", "")).strip()
+                if not name:
+                    self._json({"error": "thiếu tên Loại web trong sheet"}, 400)
+                    return
+                if preset not in cfg.get("presets", {}):
+                    self._json({"error": f"preset '{preset}' không tồn tại"}, 400)
+                    return
+                rules = cfg.setdefault("sheet_rules", [])
+                idx = body.get("index")
+                if isinstance(idx, int) and 0 <= idx < len(rules):
+                    # Sua: doi ten duoc, chi cam trung ten voi rule KHAC.
+                    for i, r in enumerate(rules):
+                        if i != idx and (r.get("name") or "").strip() == name:
+                            self._json({"error": f"đã có rule cho '{name}' rồi"}, 400)
+                            return
+                    rules[idx] = {"name": name, "preset": preset}
+                else:
+                    for r in rules:
+                        if (r.get("name") or "").strip() == name:
+                            self._json({"error": f"đã có rule cho '{name}' rồi"}, 400)
+                            return
+                    rules.append({"name": name, "preset": preset})
+                save_config(cfg)
+                self._json({"ok": True, "rules": rules})
+            elif path == "/api/sheet-rule-delete":
+                idx = body.get("index")
+                rules = cfg.setdefault("sheet_rules", [])
+                if isinstance(idx, int) and 0 <= idx < len(rules):
+                    rules.pop(idx)
+                    save_config(cfg)
+                self._json({"ok": True, "rules": rules})
+            elif path == "/api/sheet-read":
+                # Doc sheet + phan loai (khong setup) — de xem truoc.
+                # Dong xung dot thi dua luon vao hang cho duyet.
+                rows, err = sheet_read_rows(cfg)
+                if err:
+                    self._json({"ok": False, "error": err})
+                    return
+                rows = _sheet_classify(rows, cfg, st)
+                review = cfg.setdefault("sheet_review", [])
+                for r in rows:
+                    if r.get("action") == "review":
+                        q = {"domain": r["domain"], "row": r["row"],
+                             "preset": r["preset"], "current": r.get("current"),
+                             "loai": r["loai"]}
+                        if q not in review:
+                            review.append(q)
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": True, "rows": rows, "review": review})
+            elif path == "/api/sheet-setup":
+                # Setup tuan tu tung dong clean (xong 1 moi qua dong sau).
+                res = sheet_setup_clean(cfg, st)
+                self._json(res)
+            elif path == "/api/sheet-setup-one":
+                # Setup 1 dong (frontend goi tuan tu tung hang).
+                d = str(body.get("domain", "")).strip().lower()
+                row = body.get("row")
+                preset = str(body.get("preset") or "").strip()
+                if not d or not isinstance(row, int) or not preset:
+                    self._json({"error": "thiếu domain/row/preset"}, 400)
+                    return
+                res = _sheet_setup_one(d, row, preset, cfg, st)
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": True, "result": res})
+            elif path == "/api/sheet-accept":
+                # Chap nhan domain trong hang cho duyet: setup theo preset
+                # trong sheet, ghi 'da set up' ve cot J, xoa khoi hang doi.
+                d = str(body.get("domain", "")).strip().lower()
+                review = cfg.setdefault("sheet_review", [])
+                q = next((x for x in review if x.get("domain") == d), None)
+                if not q:
+                    self._json({"error": "domain không có trong hàng chờ duyệt"}, 400)
+                    return
+                res = _sheet_setup_one(d, q["row"], q["preset"], cfg, st)
+                if res.get("action") == "done":
+                    cfg["sheet_review"] = [x for x in review if x.get("domain") != d]
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": True, "result": res})
+            elif path == "/api/sheet-reject":
+                # Tu choi: xoa khoi hang cho duyet + nho de khong dua lai.
+                d = str(body.get("domain", "")).strip().lower()
+                cfg["sheet_review"] = [x for x in cfg.get("sheet_review", [])
+                                       if x.get("domain") != d]
+                if d and d not in cfg.get("sheet_ignored", []):
+                    cfg.setdefault("sheet_ignored", []).append(d)
+                save_config(cfg)
+                self._json({"ok": True})
             else:
                 self._json({"error": "khong co route"}, 404)
         except Exception:

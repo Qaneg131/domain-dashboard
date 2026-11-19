@@ -168,6 +168,39 @@
   </div>
 
   <div class="card">
+    <h2>Google Sheet — setup theo sheet</h2>
+    <p class="hint">Đọc sheet từ link CSV publish (chỉ 3 cột: <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b> (sẽ setup) và <b>"đã set up"</b> (bỏ qua). Setup xong thì ghi "đã set up" vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt.</p>
+    <div class="row">
+      <label style="flex:1">Link CSV publish <input type="text" id="sheetCsvUrl" style="width:100%" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?...&output=csv"></label>
+    </div>
+    <div class="row">
+      <label>Đọc từ dòng <input type="number" id="sheetStartRow" style="width:90px" value="1402"></label>
+      <label style="flex:1">Sheet ID (ghi cột J) <input type="text" id="sheetId" style="width:100%" placeholder="ID trong link edit của sheet"></label>
+      <label style="flex:1">File JSON key service account <input type="text" id="sheetSaKey" style="width:100%" placeholder="vd: C:\Users\Quoc An\domain-dashboard\sa-key.json"></label>
+      <button class="secondary" onclick="saveSheetSettings()">Lưu cấu hình sheet</button>
+      <span class="muted" id="sheetSettingsMsg"></span>
+    </div>
+    <p class="hint">Ghi cột J cần service account (Google Cloud → tạo service account → tải JSON key → share sheet quyền Editor) và <code>pip install google-auth</code>. Chưa có key thì vẫn đọc sheet + setup được, chỉ không ghi được cột J (log sẽ báo rõ).</p>
+    <h3 style="margin:14px 0 6px">Rule — Loại web trong sheet → Preset</h3>
+    <div id="sheetRules"></div>
+    <div class="row">
+      <input type="text" id="newRuleName" placeholder="Tên Loại web trong sheet (vd: Web Thuần Hân)" style="flex:1">
+      <select id="newRulePreset"></select>
+      <button class="secondary small" onclick="addSheetRule()">+ Thêm rule</button>
+      <span class="muted">Sửa tên rule được (bấm Sửa rồi Lưu) — không cần xóa tạo lại.</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button onclick="readSheet()">Đọc sheet</button>
+      <button onclick="setupSheetRows()">Setup từng hàng</button>
+      <button class="secondary" id="sheetStopBtn" onclick="stopSheetSetup()" style="display:none">Dừng</button>
+      <span class="muted" id="sheetMsg"></span>
+    </div>
+    <div id="sheetResults" style="margin-top:10px"></div>
+    <h3 style="margin:14px 0 6px">Chờ duyệt — domain xung đột preset</h3>
+    <div id="sheetReview"></div>
+  </div>
+
+  <div class="card">
     <h2>Domains</h2>
     <div id="managedTab">
     <div class="toolbar">
@@ -414,6 +447,7 @@ async function refresh() {
   renderPresets();
   renderEmailPreset();
   renderHttpsPreset();
+  renderSheetSettings();
   renderTable();
   // Tai danh sach domain trong tai khoan de hien chung o bang quan ly
   // (chi tai 1 lan; loi thi im lang — bang quan ly van chay duoc).
@@ -508,6 +542,130 @@ async function askPresetMismatch(domains, selected) {
       { label: 'Giữ nguyên record — chỉ làm email + HTTPS', value: 'skip', cls: 'secondary' },
       { label: 'Hủy', value: null, cls: 'secondary' },
     ]);
+}
+// --- Google Sheet ---
+let SHEET_ROWS = [];
+let SHEET_STOP = false;
+let SHEET_EDIT_IDX = -1;
+
+function renderSheetSettings() {
+  const cfg = STATE.config || {};
+  document.getElementById('sheetCsvUrl').value = cfg.sheet_csv_url || '';
+  document.getElementById('sheetStartRow').value = cfg.sheet_start_row || 1402;
+  document.getElementById('sheetId').value = cfg.sheet_id || '';
+  document.getElementById('sheetSaKey').value = cfg.sheet_sa_key || '';
+  renderSheetRules();
+  renderSheetReview();
+}
+async function saveSheetSettings() {
+  const res = await api('/api/sheet-settings', {
+    csv_url: document.getElementById('sheetCsvUrl').value,
+    start_row: parseInt(document.getElementById('sheetStartRow').value, 10) || 1,
+    sheet_id: document.getElementById('sheetId').value,
+    sa_key: document.getElementById('sheetSaKey').value,
+  });
+  document.getElementById('sheetSettingsMsg').textContent = res.ok ? 'Đã lưu.' : ('Lỗi: ' + (res.error || ''));
+  if (res.ok) await refresh();
+}
+function renderSheetRules() {
+  const cfg = STATE.config || {};
+  const rules = cfg.sheet_rules || [];
+  const presets = Object.keys(cfg.presets || {});
+  const box = document.getElementById('sheetRules');
+  box.innerHTML = rules.map((r, i) => {
+    if (SHEET_EDIT_IDX === i) {
+      return `<div class="row"><input type="text" id="editRuleName${i}" value="${esc(r.name)}" style="flex:1"><select id="editRulePreset${i}">${presets.map(p => `<option ${p === r.preset ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select><button class="small" onclick="saveSheetRuleEdit(${i})">Lưu</button><button class="secondary small" onclick="cancelSheetRuleEdit()">Hủy</button></div>`;
+    }
+    return `<div class="row"><span style="flex:1"><b>${esc(r.name)}</b> → preset <b>${esc(r.preset)}</b></span><button class="secondary small" onclick="editSheetRule(${i})">Sửa</button><button class="warn small" onclick="deleteSheetRule(${i})">Xóa</button></div>`;
+  }).join('') || '<p class="muted">Chưa có rule nào.</p>';
+  document.getElementById('newRulePreset').innerHTML = presets.map(p => `<option>${esc(p)}</option>`).join('');
+}
+function editSheetRule(i) { SHEET_EDIT_IDX = i; renderSheetRules(); }
+function cancelSheetRuleEdit() { SHEET_EDIT_IDX = -1; renderSheetRules(); }
+async function saveSheetRuleEdit(i) {
+  const name = document.getElementById('editRuleName' + i).value.trim();
+  const preset = document.getElementById('editRulePreset' + i).value;
+  const res = await api('/api/sheet-rule', { index: i, name, preset });
+  if (!res.ok && res.error) { alert(res.error); return; }
+  SHEET_EDIT_IDX = -1;
+  await refresh();
+}
+async function addSheetRule() {
+  const name = document.getElementById('newRuleName').value.trim();
+  const preset = document.getElementById('newRulePreset').value;
+  if (!name) { alert('Nhập tên Loại web trong sheet.'); return; }
+  const res = await api('/api/sheet-rule', { name, preset });
+  if (!res.ok && res.error) { alert(res.error); return; }
+  document.getElementById('newRuleName').value = '';
+  await refresh();
+}
+async function deleteSheetRule(i) {
+  if (!confirm('Xóa rule này?')) return;
+  await api('/api/sheet-rule-delete', { index: i });
+  await refresh();
+}
+function sheetRowHtml(r) {
+  const act = { setup: 'Sẽ setup', review: 'Chờ duyệt', skip: 'Bỏ qua', done: 'Xong', error: 'Lỗi', running: 'Đang setup…' }[r._state || r.action] || r.action;
+  return `<tr><td>${r.row}</td><td>${esc(r.domain)}</td><td>${esc(r.loai || '')}</td><td>${esc(r.preset || '')}</td><td>${esc(r.status_j)}</td><td>${esc(act)}</td><td>${esc(r.detail || '')}</td></tr>`;
+}
+function renderSheetResults() {
+  const box = document.getElementById('sheetResults');
+  if (!SHEET_ROWS.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<table class="tbl"><thead><tr><th>Dòng</th><th>Domain</th><th>Loại web</th><th>Preset</th><th>Cột J</th><th>Hành động</th><th>Ghi chú</th></tr></thead><tbody>${SHEET_ROWS.map(sheetRowHtml).join('')}</tbody></table>`;
+}
+async function readSheet() {
+  document.getElementById('sheetMsg').textContent = 'Đang đọc sheet…';
+  const res = await api('/api/sheet-read', {});
+  if (!res.ok) {
+    document.getElementById('sheetMsg').textContent = 'Lỗi: ' + (res.error || '');
+    return;
+  }
+  SHEET_ROWS = res.rows || [];
+  const nSetup = SHEET_ROWS.filter(r => r.action === 'setup').length;
+  const nReview = SHEET_ROWS.filter(r => r.action === 'review').length;
+  document.getElementById('sheetMsg').textContent = `Đọc xong: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
+  if (res.review) STATE.config.sheet_review = res.review;
+  renderSheetResults();
+  renderSheetReview();
+}
+async function setupSheetRows() {
+  const todo = SHEET_ROWS.filter(r => r.action === 'setup');
+  if (!todo.length) { alert('Không có dòng nào cần setup (bấm Đọc sheet trước).'); return; }
+  SHEET_STOP = false;
+  document.getElementById('sheetStopBtn').style.display = '';
+  for (let i = 0; i < todo.length; i++) {
+    if (SHEET_STOP) { document.getElementById('sheetMsg').textContent = `Đã dừng sau ${i}/${todo.length} hàng.`; break; }
+    const r = todo[i];
+    r._state = 'running';
+    document.getElementById('sheetMsg').textContent = `Đang setup ${i + 1}/${todo.length}: ${r.domain}…`;
+    renderSheetResults();
+    const res = await api('/api/sheet-setup-one', { domain: r.domain, row: r.row, preset: r.preset });
+    const out = res.result || {};
+    r._state = out.action || 'error';
+    r.action = out.action || r.action;
+    r.detail = out.detail || (res.error || '');
+    renderSheetResults();
+  }
+  document.getElementById('sheetStopBtn').style.display = 'none';
+  if (!SHEET_STOP) document.getElementById('sheetMsg').textContent = `Xong: ${todo.length} hàng.`;
+  await refresh();
+}
+function stopSheetSetup() { SHEET_STOP = true; }
+function renderSheetReview() {
+  const cfg = STATE.config || {};
+  const q = cfg.sheet_review || [];
+  const box = document.getElementById('sheetReview');
+  if (!q.length) { box.innerHTML = '<p class="muted">Không có domain nào chờ duyệt.</p>'; return; }
+  box.innerHTML = q.map(x => `<div class="row"><span style="flex:1"><b>${esc(x.domain)}</b> (dòng ${x.row}) — đang dùng preset <b>${esc(x.current || '')}</b>, sheet muốn <b>${esc(x.preset)}</b> (${esc(x.loai || '')})</span><button class="small" onclick="acceptSheetReview('${esc(x.domain)}')">Chấp nhận — setup theo ${esc(x.preset)}</button><button class="warn small" onclick="rejectSheetReview('${esc(x.domain)}')">Từ chối</button></div>`).join('');
+}
+async function acceptSheetReview(d) {
+  const res = await api('/api/sheet-accept', { domain: d });
+  log(res.result ? `${d}: ${res.result.detail}` : `${d}: lỗi — ${res.error || ''}`);
+  await refresh();
+}
+async function rejectSheetReview(d) {
+  await api('/api/sheet-reject', { domain: d });
+  await refresh();
 }
 function setupPreset() {
   // Preset Setup / Ap record se dung = preset dang chon o muc Preset
