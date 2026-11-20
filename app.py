@@ -573,11 +573,13 @@ def _sync_records(domain, records, cf, zone, other_keys=None):
         return str(e), False
 
 
-def setup_domain(domain, preset_name, cfg, skip_records=False):
+def setup_domain(domain, preset_name, cfg, skip_records=False,
+                 extra_records=None):
     """Setup 1 domain: tao zone CF -> doi NS Namecheap -> ap preset record.
     skip_records=True: giu nguyen record dang co (domain da dung preset
     khac, user khong muon set lai) — bo qua buoc ap preset, di thang toi
-    email + HTTPS. Tra ve {domain, ok, steps:[{step, ok, detail}]}."""
+    email + HTTPS. extra_records: record them (vd TXT _cf-custom-hostname
+    tu cot L) ap cung voi preset. Tra ve {domain, ok, steps:[{step, ok, detail}]}."""
     domain = domain.strip().lower()
     preset_name = preset_name or cfg.get("default_preset", "")
     steps = []
@@ -622,7 +624,8 @@ def setup_domain(domain, preset_name, cfg, skip_records=False):
                  f"preset '{preset_name}' khong ton tai — vao muc Preset "
                  "record de tao/chon preset mac dinh roi Setup lai")
             return {"domain": domain, "ok": False, "steps": steps}
-        detail, ok3 = _sync_records(domain, preset, cf, zone,
+        detail, ok3 = _sync_records(domain, list(preset) + list(extra_records or []),
+                                    cf, zone,
                                     _other_preset_keys(domain, cfg, preset_name))
         step(f"Ap preset '{preset_name}'", ok3, detail)
         if not ok3:
@@ -710,6 +713,49 @@ def _sheet_norm_status(s):
 SHEET_WANT = ("cầnsetup", "đãsetup")
 SHEET_DONE = "đãsetup"  # gia tri ghi ve cot J khi setup xong (dung dropdown cua user)
 SHEET_DONE_DISPLAY = "Đã setup"
+
+# TXT _cf-custom-hostname chi ap cho preset Web Anh Long (gia tri lay tu
+# cot L cua sheet). Web khac co cau hinh khac thi them sau.
+SHEET_CUSTOM_HOSTNAME_PRESET = "Web Anh Long"
+CUSTOM_HOSTNAME_TXT_NAME = "_cf-custom-hostname"
+
+
+def _sheet_custom_hostname_record(custom_id):
+    """Record TXT _cf-custom-hostname cho preset Web Anh Long.
+    custom_id = gia tri cot L (UUID cua store, ghi binh thuong khong dau
+    ngoac kep). Tra ve None neu cot L trong."""
+    cid = (custom_id or "").strip().strip('"').strip()
+    if not cid:
+        return None
+    return {"type": "TXT", "name": CUSTOM_HOSTNAME_TXT_NAME,
+            "content": cid}
+
+
+def _sheet_current_custom_hostname(domain, cfg, st):
+    """Gia tri TXT _cf-custom-hostname dang co tren Cloudflare (None neu
+    chua co). Doc tu status da luu (neu co records), neu khong thi check
+    moi. So sanh bo dau ngoac kep 2 ben cho chac (API co the tra ve co
+    dau ngoac)."""
+    want_name = expand_name(domain, CUSTOM_HOSTNAME_TXT_NAME).lower()
+
+    def _find(records):
+        for r in records or []:
+            if ((r.get("type") or "").upper() == "TXT"
+                    and expand_name(domain, r.get("name") or "").lower() == want_name):
+                v = str(r.get("content") or "").strip().strip('"').strip()
+                return v or None
+        return None
+
+    s = (st or {}).get(domain) or {}
+    recs = s.get("records")
+    if recs:
+        return _find(recs)
+    try:
+        new = check_domain(domain, cfg, skip_nc=True)
+        _save_check_result(st, domain, new)
+        return _find(new.get("records"))
+    except Exception:
+        return None
 
 
 # Base URL Sheets API — doi duoc qua env SHEETS_API_BASE (de test voi mock).
@@ -799,12 +845,13 @@ def _sheet_fetch_api(cfg):
 
 def sheet_read_rows(cfg):
     """Doc sheet tu start_row tro xuong, chi lay B (domain), H (loai web),
-    J (trang thai). Chi giu cac dong co J = 'can set up' hoac 'da set up'
+    J (trang thai), L (ghi chu — ID _cf-custom-hostname cho Web Anh Long).
+    Chi giu cac dong co J = 'can set up' hoac 'da set up'
     (so sanh khong phan biet hoa/thuong). Trung domain thi giu dong CUOI
     (moi nhat). Uu tien doc qua Sheets API (live) khi da nhap Sheet ID +
     file JSON key service account; neu API loi thi tu fallback ve link CSV
     publish. Tra ve (rows, error, source) — source: 'api' | 'csv';
-    rows: [{row, domain, loai, preset, status_j}]."""
+    rows: [{row, domain, loai, preset, status_j, note_l}]."""
     try:
         start = int(cfg.get("sheet_start_row") or 1)
     except (TypeError, ValueError):
@@ -837,9 +884,10 @@ def sheet_read_rows(cfg):
         if _sheet_norm_status(status_j) not in SHEET_WANT:
             continue
         loai = _sheet_cell(r, 7).strip()
+        note_l = _sheet_cell(r, 11).strip()
         by_domain[domain] = {"row": row_no, "domain": domain, "loai": loai,
                              "preset": None,  # gan sau o _sheet_classify
-                             "status_j": status_j}
+                             "status_j": status_j, "note_l": note_l}
     return list(by_domain.values()), "", source
 
 
@@ -925,6 +973,17 @@ def _sheet_classify(rows, cfg, st):
         r["preset"] = _sheet_preset_for(r.get("loai"), cfg)
         if _sheet_norm_status(r["status_j"]) == SHEET_DONE:
             r["action"], r["detail"] = "skip", "đã set up rồi"
+            # Da setup roi nhung cot L doi (chi Web Anh Long) -> cap nhat TXT.
+            # Domain tung bi tu choi thi khong tu cap nhat (user bam Setup lai tay).
+            note_l = (r.get("note_l") or "").strip()
+            if (r["preset"] == SHEET_CUSTOM_HOSTNAME_PRESET and note_l
+                    and d not in ignored):
+                cur_txt = _sheet_current_custom_hostname(d, cfg, st)
+                want_txt = note_l.strip('"').strip()
+                if cur_txt != want_txt:
+                    r["action"] = "setup"
+                    r["detail"] = (f"cần cập nhật TXT _cf-custom-hostname: {want_txt}"
+                                   + (f" (đang là {cur_txt})" if cur_txt else " (chưa có)"))
         elif d in ignored:
             r["action"], r["detail"] = "skip", "đã từ chối trước đó"
         elif not r["preset"]:
@@ -946,27 +1005,45 @@ def _sheet_classify(rows, cfg, st):
     return out
 
 
-def _sheet_setup_one(domain, row, preset, cfg, st):
+def _sheet_setup_one(domain, row, preset, cfg, st, custom_id=None, attempts=1):
     """Setup 1 dong sheet: chay setup_domain, neu ok thi ghi 'da set up'
     ve cot J cua dong do. Tra ve {domain, row, preset, action, detail}.
     Neu domain tung bi tu choi (trong sheet_ignored) thi go ra khoi danh
-    sach do — user da chu dong setup lai."""
+    sach do — user da chu dong setup lai.
+    custom_id: gia tri cot L — neu preset la Web Anh Long thi kem them
+    record TXT _cf-custom-hostname.
+    attempts: so lan thu setup (mac dinh 1). Neu that, thu lai toi da
+    attempts lan; het attempts ma van loi thi dung lai va bao loi."""
     ignored = cfg.get("sheet_ignored") or []
     if domain in ignored:
         cfg["sheet_ignored"] = [d for d in ignored if d != domain]
-    res = setup_domain(domain, preset, cfg)
-    _save_check_result(st, domain, check_domain(domain, cfg, skip_nc=True))
-    if res.get("ok"):
-        ok_w, det_w = sheet_write_status(row, SHEET_DONE_DISPLAY, cfg)
-        return {"domain": domain, "row": row, "preset": preset,
-                "action": "done",
-                "detail": ("setup xong" if ok_w else
-                           f"setup xong — NHƯNG ghi sheet lỗi: {det_w}")}
+    extra = []
+    if preset == SHEET_CUSTOM_HOSTNAME_PRESET:
+        rec = _sheet_custom_hostname_record(custom_id)
+        if rec:
+            extra.append(rec)
+    try:
+        attempts = max(1, min(int(attempts or 1), 5))
+    except (TypeError, ValueError):
+        attempts = 1
+    last_res = None
+    for _attempt in range(attempts):
+        res = setup_domain(domain, preset, cfg, extra_records=extra)
+        last_res = res
+        if res.get("ok"):
+            _save_check_result(st, domain, check_domain(domain, cfg, skip_nc=True))
+            ok_w, det_w = sheet_write_status(row, SHEET_DONE_DISPLAY, cfg)
+            return {"domain": domain, "row": row, "preset": preset,
+                    "action": "done",
+                    "detail": ("setup xong" if ok_w else
+                               f"setup xong — NHƯNG ghi sheet lỗi: {det_w}")}
     bad = [f"{s['step']}: {s.get('detail', '')}"
-           for s in res.get("steps", []) if not s.get("ok")]
+           for s in (last_res or {}).get("steps", []) if not s.get("ok")]
+    detail = "setup lỗi — " + ("; ".join(bad) if bad else "xem log")
+    if attempts > 1:
+        detail += f" (đã thử {attempts} lần)"
     return {"domain": domain, "row": row, "preset": preset,
-            "action": "error",
-            "detail": "setup lỗi — " + ("; ".join(bad) if bad else "xem log")}
+            "action": "error", "detail": detail}
 
 
 # Khoa chong 2 luot setup sheet chay chong len nhau (tu dong vs thu cong).
@@ -1048,7 +1125,8 @@ def sheet_setup_clean(cfg, st):
         d = r["domain"]
         if r["action"] == "review":
             q = {"domain": d, "row": r["row"], "preset": r["preset"],
-                 "current": r.get("current"), "loai": r["loai"]}
+                 "current": r.get("current"), "loai": r["loai"],
+                 "note_l": r.get("note_l", "")}
             if q not in review:
                 review.append(q)
             queued.append(q)
@@ -1061,7 +1139,8 @@ def sheet_setup_clean(cfg, st):
                             "preset": r["preset"], "action": "skip",
                             "detail": r["detail"]})
             continue
-        results.append(_sheet_setup_one(d, r["row"], r["preset"], cfg, st))
+        results.append(_sheet_setup_one(d, r["row"], r["preset"], cfg, st,
+                                        custom_id=r.get("note_l")))
     save_config(cfg)
     save_status(st)
     return {"ok": True, "results": results, "queued": queued}
@@ -1906,6 +1985,11 @@ class Handler(BaseHTTPRequestHandler):
                 d = str(body.get("domain", "")).strip().lower()
                 row = body.get("row")
                 preset = str(body.get("preset") or "").strip()
+                custom_id = str(body.get("custom_id") or "").strip()
+                try:
+                    attempts = max(1, min(int(body.get("attempts") or 1), 5))
+                except (TypeError, ValueError):
+                    attempts = 1
                 if not d or not isinstance(row, int) or not preset:
                     self._json({"error": "thiếu domain/row/preset"}, 400)
                     return
@@ -1913,7 +1997,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "đang có 1 lượt setup sheet khác chạy, thử lại sau"}, 409)
                     return
                 try:
-                    res = _sheet_setup_one(d, row, preset, cfg, st)
+                    res = _sheet_setup_one(d, row, preset, cfg, st,
+                                           custom_id=custom_id, attempts=attempts)
                 finally:
                     SHEET_LOCK.release()
                 save_config(cfg)
@@ -1928,7 +2013,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not q:
                     self._json({"error": "domain không có trong hàng chờ duyệt"}, 400)
                     return
-                res = _sheet_setup_one(d, q["row"], q["preset"], cfg, st)
+                res = _sheet_setup_one(d, q["row"], q["preset"], cfg, st,
+                                       custom_id=q.get("note_l", ""))
                 if res.get("action") == "done":
                     cfg["sheet_review"] = [x for x in review if x.get("domain") != d]
                 save_config(cfg)

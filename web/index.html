@@ -186,7 +186,7 @@
 
   <div class="card">
     <h2>Google Sheet — setup theo sheet</h2>
-    <p class="hint">Đọc sheet từ link CSV publish (chỉ 3 cột: <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã setup"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt.</p>
+    <p class="hint">Đọc sheet từ link CSV publish (cột <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành, <b>L</b> Ghi chú), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã setup"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt. Với preset <b>Web Anh Long</b>, nếu cột <b>L</b> có ghi ID thì setup kèm record TXT <b>_cf-custom-hostname</b> = ID đó (ghi bình thường, không dấu ngoặc kép); cột L trống thì setup bình thường. Sau này đổi ID ở cột L thì đọc lại sheet sẽ tự cập nhật TXT đó. Bấm <b>Setup lại</b> ở mục Bỏ qua thì thử lại tối đa 3 lần, hết 3 lần vẫn lỗi thì dừng và báo lỗi.</p>
     <div class="row">
       <label style="flex:1">Link CSV publish <input type="text" id="sheetCsvUrl" style="width:100%" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?...&output=csv"></label>
     </div>
@@ -680,10 +680,11 @@ function sheetRowHtml(r) {
 }
 async function setupSheetRowAgain(domain, row, preset) {
   // Setup lai 1 dong Bo qua (co the la dong tung bi tu choi — backend se go khoi
-  // danh sach da tu choi). Xong thi cap nhat dong + so lieu ngay.
+  // danh sach da tu choi). Thu lai toi da 3 lan, het 3 lan thi bao loi.
+  // Xong thi cap nhat dong + so lieu ngay.
   const r = SHEET_ROWS.find(x => x.domain === domain);
   if (r) { r._state = 'running'; renderSheetResults(); }
-  const res = await api('/api/sheet-setup-one', { domain, row, preset });
+  const res = await api('/api/sheet-setup-one', { domain, row, preset, custom_id: r ? (r.note_l || '') : '', attempts: 3 });
   const out = res.result || {};
   if (r) {
     r._state = out.action || 'error';
@@ -752,7 +753,7 @@ async function setupSheetRows() {
     r._state = 'running';
     document.getElementById('sheetMsg').textContent = `Đang setup ${i + 1}/${todo.length}: ${r.domain}…`;
     renderSheetResults();
-    const res = await api('/api/sheet-setup-one', { domain: r.domain, row: r.row, preset: r.preset });
+    const res = await api('/api/sheet-setup-one', { domain: r.domain, row: r.row, preset: r.preset, custom_id: r.note_l || '' });
     const out = res.result || {};
     r._state = out.action || 'error';
     r.action = out.action || r.action;

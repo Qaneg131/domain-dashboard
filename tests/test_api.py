@@ -1293,6 +1293,108 @@ def main():
     dash.sheet_write_status = _real_write
     print("  OK", flush=True)
 
+    print("TEST 45: TXT _cf-custom-hostname tu cot L (chi Web Anh Long) + Setup lai thu 3 lan...", flush=True)
+    cfg45 = dict(cfg41)
+    cfg45["sheet_review"] = []
+    cfg45["sheet_ignored"] = []
+    def fake_csv45(url):
+        rows = [["", "Tên Domain", "Hạn Domain", "DaysLeft", "LLC", "Address",
+                 "Số lần làm lại web", "Loại web", "Tên Dev", "Đã hoàn thành", "Note"]]
+        while len(rows) < 1401:
+            rows.append([""] * 12)
+        def mk(domain, loai, j, note=""):
+            r = [""] * 12
+            r[1] = domain; r[7] = loai; r[9] = j; r[11] = note
+            return r
+        rows.append(mk("long45.com", "Web Thuần Long", "Cần set up", "5c8a9551-74a3-453d-a6cb-2608d44de0a5"))  # 1402
+        rows.append(mk("long45b.com", "Web Thuần Long", "Cần set up"))  # 1403 (cot L trong)
+        rows.append(mk("han45.com", "Web Thuần Hân", "Cần set up", "aaaa1111-2222-3333-4444-555566667777"))  # 1404 (khong phai Long)
+        rows.append(mk("done45.com", "Web Thuần Long", "Đã setup", "99998888-7777-6666-5555-444433332222"))  # 1405 da setup, doi ID
+        rows.append(mk("done45b.com", "Web Thuần Long", "Đã setup", "11112222-3333-4444-5555-666677778888"))  # 1406 da setup, ID khop
+        return rows
+    dash._sheet_fetch_csv = fake_csv45
+    rows45, err45, _src45 = dash.sheet_read_rows(cfg45)
+    assert not err45, err45
+    by45 = {r["domain"]: r for r in rows45}
+    assert by45["long45.com"]["note_l"] == "5c8a9551-74a3-453d-a6cb-2608d44de0a5", by45
+    assert by45["long45b.com"]["note_l"] == "", by45
+    # done45.com: da setup + co TXT cu (ID khac cot L) -> can cap nhat.
+    # done45b.com: da setup + co TXT khop cot L -> van skip.
+    for d, txt in [("done45.com", "00000000-1111-2222-3333-444455556666"),
+                   ("done45b.com", "11112222-3333-4444-5555-666677778888")]:
+        z, _c = cf.get_or_create_zone(d)
+        cf.create_record(z["id"], "CNAME", d, "stores.sarivon.com", True)
+        cf.create_record(z["id"], "TXT", "_cf-custom-hostname." + d, txt, False)
+    st45 = {}
+    for d in ("done45.com", "done45b.com"):
+        dash._save_check_result(st45, d, dash.check_domain(d, cfg45, skip_nc=True))
+    cls45 = dash._sheet_classify(rows45, cfg45, st45)
+    act45 = {r["domain"]: r["action"] for r in cls45}
+    det45 = {r["domain"]: r["detail"] for r in cls45}
+    assert act45["done45.com"] == "setup", act45  # doi ID -> cap nhat TXT
+    assert "cập nhật TXT" in det45["done45.com"], det45
+    assert act45["done45b.com"] == "skip", act45  # ID khop -> van bo qua
+    assert act45["long45.com"] == "setup" and act45["long45b.com"] == "setup" and act45["han45.com"] == "setup", act45
+    # Setup long45.com (co cot L) -> co TXT _cf-custom-hostname.
+    for d in ("long45.com", "long45b.com", "han45.com", "done45.com"):
+        STATE["nc_ns"][d] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    dash.sheet_write_status = fake_write
+    one45 = dash._sheet_setup_one("long45.com", 1402, "Web Anh Long", cfg45, st45,
+                                  custom_id="5c8a9551-74a3-453d-a6cb-2608d44de0a5")
+    assert one45["action"] == "done", one45
+    z45, _c = cf.get_or_create_zone("long45.com")
+    recs45 = cf.list_records(z45["id"])
+    assert any(x["type"] == "TXT" and x["name"] == "_cf-custom-hostname.long45.com"
+               and x["content"] == "5c8a9551-74a3-453d-a6cb-2608d44de0a5" for x in recs45), recs45
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in recs45), recs45
+    # long45b.com (cot L trong) -> chi CNAME, khong co TXT.
+    one45b = dash._sheet_setup_one("long45b.com", 1403, "Web Anh Long", cfg45, st45, custom_id="")
+    assert one45b["action"] == "done", one45b
+    z45b, _c = cf.get_or_create_zone("long45b.com")
+    assert not any(x["type"] == "TXT" and "_cf-custom-hostname" in x["name"]
+                   for x in cf.list_records(z45b["id"])), cf.list_records(z45b["id"])
+    # han45.com (Web Chi Han, co cot L) -> khong them TXT (chi Web Anh Long).
+    one45c = dash._sheet_setup_one("han45.com", 1404, "Web Chị Hân", cfg45, st45,
+                                   custom_id="aaaa1111-2222-3333-4444-555566667777")
+    assert one45c["action"] == "done", one45c
+    z45c, _c = cf.get_or_create_zone("han45.com")
+    assert not any(x["type"] == "TXT" and "_cf-custom-hostname" in x["name"]
+                   for x in cf.list_records(z45c["id"])), cf.list_records(z45c["id"])
+    # Cap nhat TXT: done45.com doi ID cu -> ID moi (cot L).
+    one45d = dash._sheet_setup_one("done45.com", 1405, "Web Anh Long", cfg45, st45,
+                                   custom_id="99998888-7777-6666-5555-444433332222")
+    assert one45d["action"] == "done", one45d
+    z45d, _c = cf.get_or_create_zone("done45.com")
+    txts = [x for x in cf.list_records(z45d["id"]) if x["type"] == "TXT" and "_cf-custom-hostname" in x["name"]]
+    assert len(txts) == 1 and txts[0]["content"] == "99998888-7777-6666-5555-444433332222", txts
+    dash.sheet_write_status = _real_write
+    # Setup lai thu toi da 3 lan: that 3 lan -> bao loi co ghi so lan.
+    calls = {"n": 0}
+    _real_setup = dash.setup_domain
+    def fake_setup_fail(domain, preset_name, cfg, skip_records=False, extra_records=None):
+        calls["n"] += 1
+        return {"domain": domain, "ok": False,
+                "steps": [{"step": "Tao/lay zone Cloudflare", "ok": False, "detail": "boom"}]}
+    dash.setup_domain = fake_setup_fail
+    fail45 = dash._sheet_setup_one("retry45.com", 1500, "Web Chị Hân", cfg45, {}, attempts=3)
+    assert fail45["action"] == "error" and calls["n"] == 3, (fail45, calls)
+    assert "đã thử 3 lần" in fail45["detail"], fail45
+    # That 1 lan roi duoc -> dung o lan 2, tra ve done.
+    calls["n"] = 0
+    def fake_setup_once(domain, preset_name, cfg, skip_records=False, extra_records=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"domain": domain, "ok": False,
+                    "steps": [{"step": "Tao/lay zone Cloudflare", "ok": False, "detail": "boom"}]}
+        return {"domain": domain, "ok": True, "steps": []}
+    dash.setup_domain = fake_setup_once
+    dash.sheet_write_status = fake_write
+    ok45 = dash._sheet_setup_one("retry45b.com", 1501, "Web Chị Hân", cfg45, {}, attempts=3)
+    assert ok45["action"] == "done" and calls["n"] == 2, (ok45, calls)
+    dash.setup_domain = _real_setup
+    dash.sheet_write_status = _real_write
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 
