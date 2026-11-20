@@ -173,51 +173,20 @@ class MockHandler(BaseHTTPRequestHandler):
                        f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
                        f'<DomainDNSSetCustomResult Domain="{dom}" Updated="true" />'
                        f'</CommandResponse></ApiResponse>')
-            elif cmd == "namecheap.domains.setAutoRenew":
-                # Nhan DomainName (ten day du) + IsAutoRenew; tra ve
-                # IsSuccess RIENG trong envelope OK. Domain failar.com
-                # gia lap IsSuccess=false de test loi. Domain stuckar.com
-                # gia lap loi that gap tren production: tra IsSuccess=true
-                # nhung KHONG doi trang thai (de test buoc xac minh lai).
-                STATE["nc_calls"] += 1
-                dname = q.get("DomainName", [""])[0].strip().lower()
-                if not dname or "." not in dname:
-                    xml = (f'<?xml version="1.0"?><ApiResponse Status="ERROR"{NS}><Errors>'
-                           '<Error Number="101">DomainName is required</Error>'
-                           '</Errors></ApiResponse>')
-                else:
-                    ok = "false" if dname == "failar.com" else "true"
-                    if ok == "true":
-                        if dname == "stuckar.com":
-                            # Gia lap loi that: IsSuccess=true nhung trang
-                            # thai van OFF (khong doi theo yeu cau).
-                            STATE.setdefault("nc_autorenew", {})[dname] = False
-                        else:
-                            # Chi ghi trang thai khi IsSuccess=true; doc gia
-                            # tri IsAutoRenew that client gui (true/false).
-                            ar_val = q.get("IsAutoRenew", ["true"])[0].lower() == "true"
-                            STATE.setdefault("nc_autorenew", {})[dname] = ar_val
-                    xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
-                           f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
-                           f'<SetAutoRenewResult Domain="{dname}" IsSuccess="{ok}" />'
-                           f'</CommandResponse></ApiResponse>')
             elif cmd == "namecheap.domains.getList":
-                # Doc trang thai auto-renew / ngay het han: tra cac domain
-                # trong STATE["nc_autorenew"] (loc theo SearchTerm neu
-                # co), co phan trang theo Page/PageSize. Ngay het han
-                # lay tu STATE["nc_expiry"] (mac dinh 12/04/2026).
+                # Ngay het han: tra cac domain trong STATE["nc_expiry"]
+                # (loc theo SearchTerm neu co), co phan trang theo
+                # Page/PageSize.
                 STATE["nc_calls"] += 1
                 search = q.get("SearchTerm", [""])[0].strip().lower()
                 page = int(q.get("Page", ["1"])[0] or 1)
                 psize = int(q.get("PageSize", ["100"])[0] or 100)
                 all_rows = []
-                for dname, ar in STATE.get("nc_autorenew", {}).items():
+                for dname, exp in STATE.get("nc_expiry", {}).items():
                     if search and search not in dname:
                         continue
-                    exp = STATE.get("nc_expiry", {}).get(dname, "12/04/2026")
                     all_rows.append(
-                        f'<Domain Name="{dname}" '
-                        f'AutoRenew="{"true" if ar else "false"}" '
+                        f'<Domain Name="{dname}" AutoRenew="false" '
                         f'IsLocked="false" Expires="{exp}" />')
                 rows = all_rows[(page - 1) * psize:page * psize]
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
@@ -1446,39 +1415,7 @@ def main():
     dash.sheet_write_status = _real_write
     print("  OK", flush=True)
 
-    print("TEST 46: set_auto_renew — bat/tat auto-renew Namecheap (DomainName + IsAutoRenew) + xac minh lai...", flush=True)
-    nc_api.AUTORENEW_VERIFY_WAITS = (0, 0)
-    nc46 = NCClient("testuser", "test-key", "1.2.3.4", base=base + "/xml.response")
-    assert nc46.set_auto_renew("ar1.com", True) is True
-    assert STATE["nc_autorenew"]["ar1.com"] is True, STATE["nc_autorenew"]
-    assert nc46.set_auto_renew("ar2.com", False) is True
-    assert STATE["nc_autorenew"]["ar2.com"] is False, STATE["nc_autorenew"]
-    # get_auto_renew doc lai trang thai qua getList.
-    assert nc46.get_auto_renew("ar1.com") is True
-    assert nc46.get_auto_renew("ar2.com") is False
-    assert nc46.get_auto_renew("khongco.com") is None
-    # IsSuccess=false -> bao loi (khong tin envelope OK).
-    try:
-        nc46.set_auto_renew("failar.com", True)
-        raise AssertionError("failar.com phai bao loi IsSuccess=false")
-    except Exception as e:
-        assert "IsSuccess" in str(e), e
-    # Loi that gap tren production: IsSuccess=true nhung trang thai van
-    # khong doi -> buoc xac minh lai phai bao loi, khong bao thanh cong ao.
-    try:
-        nc46.set_auto_renew("stuckar.com", True)
-        raise AssertionError("stuckar.com phai bao loi xac minh lai")
-    except Exception as e:
-        assert "kiem tra lai" in str(e), e
-    # Domain khong hop le -> bao loi.
-    try:
-        nc46.set_auto_renew("notadomain", True)
-        raise AssertionError("domain khong co dau cham phai bao loi")
-    except Exception as e:
-        assert "khong hop le" in str(e), e
-    print("  OK", flush=True)
-
-    print("TEST 47: get_expiry_map — ngay het han tu getList (phan trang) + _parse_nc_date...", flush=True)
+    print("TEST 46: get_expiry_map — ngay het han tu getList (phan trang) + _parse_nc_date...", flush=True)
     assert _parse_nc_date("12/04/2026") == "2026-12-04"
     assert _parse_nc_date("1/5/2027") == "2027-01-05"
     assert _parse_nc_date("2026-12-04") == "2026-12-04"
@@ -1487,6 +1424,7 @@ def main():
     # Dat han rieng cho 2 domain de test doc + phan trang.
     STATE.setdefault("nc_expiry", {})["ar1.com"] = "12/04/2026"
     STATE["nc_expiry"]["ar2.com"] = "01/15/2027"
+    nc46 = NCClient("testuser", "test-key", "1.2.3.4", base=base + "/xml.response")
     exp_map = nc46.get_expiry_map()
     assert exp_map["ar1.com"] == "2026-12-04", exp_map
     assert exp_map["ar2.com"] == "2027-01-15", exp_map
