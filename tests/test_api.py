@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-ACCT = "c30bace6d8d169fb77ae278b7d0fc82a"
+ACCT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 NS1, NS2 = "brit.ns.cloudflare.com", "langston.ns.cloudflare.com"
 
 STATE = {
@@ -378,55 +378,55 @@ def main():
     from dns_check import doh_ns
 
     cfg = {"cf_token": "test-token", "cf_account_id": ACCT,
-           "nc_user": "tuanah252", "nc_api_key": "test-key",
+           "nc_user": "testuser", "nc_api_key": "test-key",
            "nc_client_ip": "1.2.3.4",
-           "domains": ["elvellia.com"],
+           "domains": ["testa.com"],
            "presets": {"web": [{"type": "A", "name": "@", "content": "1.11.11.11", "proxied": True},
                                {"type": "A", "name": "www", "content": "1.11.11.11", "proxied": True}]},
            "default_preset": "web"}
 
     print("TEST 1: CF client (zone + records)...", flush=True)
     cf = CFClient("test-token", ACCT, base=base + "/client/v4")
-    assert cf.get_zone("elvellia.com") is None
-    z, created = cf.get_or_create_zone("elvellia.com")
+    assert cf.get_zone("testa.com") is None
+    z, created = cf.get_or_create_zone("testa.com")
     assert created and z["name_servers"] == [NS1, NS2], z
-    z2, created2 = cf.get_or_create_zone("elvellia.com")
+    z2, created2 = cf.get_or_create_zone("testa.com")
     assert not created2 and z2["id"] == z["id"]
     assert cf.list_records(z["id"]) == []
-    cf.create_record(z["id"], "A", "elvellia.com", "1.11.11.11", True)
+    cf.create_record(z["id"], "A", "testa.com", "1.11.11.11", True)
     assert len(cf.list_records(z["id"])) == 1
     assert cf.delete_all_records(z["id"]) == 1
     assert cf.list_records(z["id"]) == []
     print("  OK", flush=True)
 
     print("TEST 2: NC client (get/set NS)...", flush=True)
-    assert split_domain("elvellia.com") == ("elvellia", "com")
-    nc = NCClient("tuanah252", "test-key", "1.2.3.4", base=base + "/xml.response")
-    assert nc.get_nameservers("elvellia.com") == ["dns1.registrar-servers.com",
+    assert split_domain("testa.com") == ("testa", "com")
+    nc = NCClient("testuser", "test-key", "1.2.3.4", base=base + "/xml.response")
+    assert nc.get_nameservers("testa.com") == ["dns1.registrar-servers.com",
                                                    "dns2.registrar-servers.com"]
-    assert nc.set_nameservers("elvellia.com", [NS1, NS2])
-    assert nc.get_nameservers("elvellia.com") == [NS1, NS2]
+    assert nc.set_nameservers("testa.com", [NS1, NS2])
+    assert nc.get_nameservers("testa.com") == [NS1, NS2]
     print("  OK", flush=True)
 
     print("TEST 3: DoH NS...", flush=True)
-    assert doh_ns("elvellia.com", base=base + "/dns-query") == [NS1, NS2]
+    assert doh_ns("testa.com", base=base + "/dns-query") == [NS1, NS2]
     print("  OK", flush=True)
 
     print("TEST 4: setup_domain full flow (zone moi + NS + preset web)...", flush=True)
-    STATE["zones"].pop("welvella.com", None)
-    STATE["nc_ns"]["welvella.com"] = ["dns1.registrar-servers.com",
+    STATE["zones"].pop("testb.com", None)
+    STATE["nc_ns"]["testb.com"] = ["dns1.registrar-servers.com",
                                       "dns2.registrar-servers.com"]
-    res = dash.setup_domain("welvella.com", "web", dict(cfg))
+    res = dash.setup_domain("testb.com", "web", dict(cfg))
     print("  steps:", [(s["step"], s["ok"]) for s in res["steps"]], flush=True)
     assert res["ok"], res
-    st = dash.check_domain("welvella.com", cfg)
+    st = dash.check_domain("testb.com", cfg)
     assert st["ns_ok"], st
     assert st["records_ok"], st
     assert len(st["records"]) == 2, st["records"]
     print("  OK: ns_ok + records_ok (2 record web)", flush=True)
 
     print("TEST 5: setup lai domain da set (bo qua NS, ap lai preset)...", flush=True)
-    res2 = dash.setup_domain("welvella.com", "web", dict(cfg))
+    res2 = dash.setup_domain("testb.com", "web", dict(cfg))
     assert res2["ok"], res2
     assert any("da tro dung" in s["detail"] for s in res2["steps"]), res2["steps"]
     print("  OK", flush=True)
@@ -438,14 +438,14 @@ def main():
 
     print("TEST 7: thieu CF token -> bao loi ro, khong crash...", flush=True)
     cfg2 = dict(cfg, cf_token="")
-    res4 = dash.setup_domain("elvellia.com", "web", cfg2)
+    res4 = dash.setup_domain("testa.com", "web", cfg2)
     assert not res4["ok"], res4
-    st2 = dash.check_domain("elvellia.com", cfg2)
+    st2 = dash.check_domain("testa.com", cfg2)
     assert st2["error"] and "token" in st2["error"], st2
     print("  OK", flush=True)
 
     print("TEST 8: Email Routing (enable -> rule -> delete -> disable)...", flush=True)
-    z = cf.get_zone("welvella.com")
+    z = cf.get_zone("testb.com")
     er = cf.get_email_routing(z["id"])
     assert er["enabled"] is False, er
     cf.enable_email_routing(z["id"])
@@ -454,7 +454,7 @@ def main():
     # Enable da them MX/SPF/DKIM vao records.
     assert any(r["type"] == "MX" for r in cf.list_records(z["id"]))
     # Rule thuong: tao + xoa duoc qua /rules.
-    lit = cf.create_email_rule(z["id"], "info@welvella.com", ["owner@gmail.com"])
+    lit = cf.create_email_rule(z["id"], "info@testb.com", ["owner@gmail.com"])
     assert len(cf.list_email_rules(z["id"])) == 1
     cf.delete_email_rule(z["id"], lit["id"])
     assert cf.list_email_rules(z["id"]) == []
@@ -486,7 +486,7 @@ def main():
     print("  OK", flush=True)
 
     print("TEST 10: check_domain co them email + https...", flush=True)
-    st3 = dash.check_domain("welvella.com", cfg)
+    st3 = dash.check_domain("testb.com", cfg)
     assert st3["email"] is not None and st3["https"] is not None, st3
     assert st3["https"]["ok"] is True, st3["https"]
     print("  OK:", st3["email"], st3["https"], flush=True)
@@ -510,19 +510,19 @@ def main():
     cfg3["email_preset"] = {"enabled": True, "rules": [
         {"match": "info@", "to": "owner@gmail.com"},
         {"match": "*", "to": "owner@gmail.com"}]}
-    # Reset welvella: tat email + xoa rule truoc.
+    # Reset testb: tat email + xoa rule truoc.
     cf.disable_email_routing(z["id"])
-    res5 = dash.setup_domain("welvella.com", "web", cfg3)
+    res5 = dash.setup_domain("testb.com", "web", cfg3)
     print("  steps:", [(s["step"], s["ok"]) for s in res5["steps"]], flush=True)
     assert res5["ok"], res5
-    assert any("info@welvella.com" in s["step"] for s in res5["steps"]), res5["steps"]
+    assert any("info@testb.com" in s["step"] for s in res5["steps"]), res5["steps"]
     assert any(s["step"].startswith("Rule *") for s in res5["steps"]), res5["steps"]
-    st4 = dash.check_domain("welvella.com", cfg3)
+    st4 = dash.check_domain("testb.com", cfg3)
     assert st4["email"]["enabled"] is True and st4["email"]["rules"] == 2, st4["email"]
     print("  OK: email enabled + 2 rule", flush=True)
 
     print("TEST 13: setup lai — rule da co thi giu, khong tao trung...", flush=True)
-    res6 = dash.setup_domain("welvella.com", "web", cfg3)
+    res6 = dash.setup_domain("testb.com", "web", cfg3)
     assert res6["ok"], res6
     assert sum(1 for s in res6["steps"] if s["detail"] == "da co san") == 2, res6["steps"]
     assert len(cf.list_email_rules(z["id"])) == 2
@@ -531,14 +531,14 @@ def main():
     print("TEST 14: email preset chua nhap dia chi nhan -> bo qua, van ok...", flush=True)
     cfg4 = dict(cfg)
     cfg4["email_preset"] = {"enabled": True, "rules": [{"match": "info@", "to": ""}]}
-    res7 = dash.setup_domain("welvella.com", "web", cfg4)
+    res7 = dash.setup_domain("testb.com", "web", cfg4)
     assert res7["ok"], res7
     assert any("chua nhap dia chi nhan" in s["detail"] for s in res7["steps"]), res7["steps"]
     print("  OK", flush=True)
 
     print("TEST 15: list_zones tra het zone trong tai khoan...", flush=True)
     zones = cf.list_zones()
-    assert {x["name"] for x in zones} >= {"elvellia.com", "welvella.com"}, zones
+    assert {x["name"] for x in zones} >= {"testa.com", "testb.com"}, zones
     print("  OK:", [x["name"] for x in zones], flush=True)
 
     print("TEST 16: Setup ap luon HTTPS preset (Flexible + always on + TLS 1.2)...", flush=True)
@@ -547,10 +547,10 @@ def main():
                             "always_https": "on", "min_tls_version": "1.2",
                             "rewrites": "on"}
     cfg5["email_preset"] = {"enabled": False, "rules": []}
-    res8 = dash.setup_domain("welvella.com", "web", cfg5)
+    res8 = dash.setup_domain("testb.com", "web", cfg5)
     assert res8["ok"], res8
     assert any(s["step"] == "HTTPS" and s["ok"] for s in res8["steps"]), res8["steps"]
-    st5 = dash.check_domain("welvella.com", cfg5)
+    st5 = dash.check_domain("testb.com", cfg5)
     assert st5["https"]["ssl"] == "flexible", st5["https"]
     assert st5["https"]["always_https"] == "on", st5["https"]
     assert st5["https"]["min_tls"] == "1.2", st5["https"]
@@ -558,7 +558,7 @@ def main():
     print("  OK:", st5["https"], flush=True)
 
     print("TEST 17: Cache Rules — By Pass (tao / trung / go)...", flush=True)
-    z2 = cf.get_zone("welvella.com")
+    z2 = cf.get_zone("testb.com")
     assert cf.has_cache_bypass(z2["id"]) is False
     r1 = cf.set_cache_bypass(z2["id"])
     assert r1["already"] is False
@@ -664,10 +664,10 @@ def main():
         print("  OK:", str(e)[:100], flush=True)
 
     print("TEST 24: zone chua co ruleset cache — 404 that ('The ruleset does not exist.') phai tra None, khong phai loi quyen...", flush=True)
-    z8 = cf.get_zone("elvellia.com")
+    z8 = cf.get_zone("testa.com")
     assert cf.get_cache_ruleset(z8["id"]) is None
     assert cf.has_cache_bypass(z8["id"]) is False
-    st24 = dash.check_domain("elvellia.com", cfg6)
+    st24 = dash.check_domain("testa.com", cfg6)
     assert st24["cache_bypass"] is False, st24
     assert not st24.get("cache_error"), st24
     print("  OK", flush=True)
@@ -979,7 +979,7 @@ def main():
     print("TEST 39: _sync_records — xung dot CNAME + setup_domain dung preset duoc chon (khong phai mac dinh)...", flush=True)
     # (a) Domain co CNAME @, preset muon A @ -> xoa CNAME truoc roi tao A.
     z39, _c = cf.get_or_create_zone("cname39.com")
-    cf.create_record(z39["id"], "CNAME", "cname39.com", "stores.sarivon.com", True)
+    cf.create_record(z39["id"], "CNAME", "cname39.com", "stores.shophost.com", True)
     d39, ok39 = dash._sync_records("cname39.com",
         [{"type": "A", "name": "@", "content": "1.11.11.11", "proxied": True},
          {"type": "A", "name": "www", "content": "1.11.11.11", "proxied": True}], cf, z39)
@@ -991,53 +991,53 @@ def main():
     z39b, _c = cf.get_or_create_zone("cname39b.com")
     cf.create_record(z39b["id"], "A", "cname39b.com", "1.11.11.11", True)
     d39b, ok39b = dash._sync_records("cname39b.com",
-        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39b)
+        [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}], cf, z39b)
     assert ok39b, d39b
     r39b = cf.list_records(z39b["id"])
     assert not any(x["type"] == "A" for x in r39b), r39b
-    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in r39b), r39b
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.shophost.com" for x in r39b), r39b
     # (c) CNAME giong het thi giu, khong xoa.
     z39c, _c = cf.get_or_create_zone("cname39c.com")
-    cf.create_record(z39c["id"], "CNAME", "cname39c.com", "stores.sarivon.com", True)
+    cf.create_record(z39c["id"], "CNAME", "cname39c.com", "stores.shophost.com", True)
     d39c, ok39c = dash._sync_records("cname39c.com",
-        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39c)
+        [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}], cf, z39c)
     assert ok39c and "giu 1 record giong het" in d39c, d39c
     assert len(cf.list_records(z39c["id"])) == 1
     # (d) Record he thong Email Routing (MX) khong bi xoa khi preset muon CNAME @.
     z39d, _c = cf.get_or_create_zone("cname39d.com")
     cf.create_record(z39d["id"], "MX", "cname39d.com", "route1.mx.cloudflare.net", False)
     d39d, ok39d = dash._sync_records("cname39d.com",
-        [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}], cf, z39d)
+        [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}], cf, z39d)
     r39d = cf.list_records(z39d["id"])
     assert any(x["type"] == "MX" and "mx.cloudflare.net" in x["content"] for x in r39d), r39d
     # (e) setup_domain dung preset duoc truyen vao, khong phai mac dinh.
     cfg39 = dict(cfg)
     cfg39["presets"] = dict(cfg["presets"])
-    cfg39["presets"]["Web Long"] = [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}]
+    cfg39["presets"]["Web Long"] = [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}]
     cfg39["default_preset"] = "web"
     STATE["nc_ns"]["long39.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
     res39 = dash.setup_domain("long39.com", "Web Long", cfg39)
     assert res39["ok"], res39
     assert any(s["step"] == "Ap preset 'Web Long'" and s["ok"] for s in res39["steps"]), res39["steps"]
     st39 = dash.check_domain("long39.com", cfg39)
-    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in st39["records"]), st39
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.shophost.com" for x in st39["records"]), st39
     assert st39["records_preset"] == "Web Long", st39
     print("  OK", flush=True)
 
     print("TEST 40: _sync_records go record preset cu (1 domain 1 cau hinh) + setup_domain skip_records...", flush=True)
     cfg40 = dict(cfg)
     cfg40["presets"] = {
-        "Web Chị Hân": [{"type": "A", "name": "@", "content": "134.209.163.195", "proxied": True},
-                        {"type": "A", "name": "www", "content": "134.209.163.195", "proxied": True}],
-        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}],
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "203.0.113.10", "proxied": True},
+                        {"type": "A", "name": "www", "content": "203.0.113.10", "proxied": True}],
+        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}],
     }
     cfg40["default_preset"] = "Web Chị Hân"
     # (a) Domain dang dung 'Web Chi Han', ap 'Web Anh Long' -> A @ bi xoa
     # do xung dot CNAME, A www bi go vi thuoc preset cu, record tu do + MX
     # he thong duoc giu.
     z40, _c = cf.get_or_create_zone("one40.com")
-    cf.create_record(z40["id"], "A", "one40.com", "134.209.163.195", True)
-    cf.create_record(z40["id"], "A", "www.one40.com", "134.209.163.195", True)
+    cf.create_record(z40["id"], "A", "one40.com", "203.0.113.10", True)
+    cf.create_record(z40["id"], "A", "www.one40.com", "203.0.113.10", True)
     cf.create_record(z40["id"], "TXT", "blog.one40.com", "custom", False)
     cf.create_record(z40["id"], "MX", "one40.com", "route1.mx.cloudflare.net", False)
     other40 = dash._other_preset_keys("one40.com", cfg40, "Web Anh Long")
@@ -1045,7 +1045,7 @@ def main():
     assert ok40, d40
     assert "da go 1 record cua preset khac" in d40, d40
     r40 = cf.list_records(z40["id"])
-    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in r40), r40
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.shophost.com" for x in r40), r40
     assert not any(x["type"] == "A" for x in r40), r40
     assert any(x["type"] == "TXT" and x["content"] == "custom" for x in r40), r40
     assert any(x["type"] == "MX" and "mx.cloudflare.net" in x["content"] for x in r40), r40
@@ -1062,9 +1062,9 @@ def main():
     print("TEST 41: Google Sheet — doc B/H/J tu start_row, map rule, setup tung hang + ghi cot J...", flush=True)
     cfg41 = dict(cfg)
     cfg41["presets"] = {
-        "Web Chị Hân": [{"type": "A", "name": "@", "content": "134.209.163.195", "proxied": True},
-                        {"type": "A", "name": "www", "content": "134.209.163.195", "proxied": True}],
-        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.sarivon.com", "proxied": True}],
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "203.0.113.10", "proxied": True},
+                        {"type": "A", "name": "www", "content": "203.0.113.10", "proxied": True}],
+        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}],
     }
     cfg41["default_preset"] = "Web Chị Hân"
     cfg41["sheet_rules"] = [
@@ -1085,18 +1085,18 @@ def main():
             r = [""] * 12
             r[1] = domain; r[7] = loai; r[9] = j
             return r
-        rows.append(mk("stylenora.com", "Web Thuần Hân", "Cần set up"))   # 1402
-        rows.append(mk("vellvyn.com", "Web Thuần Hân", ""))                # 1403 bo qua (J trong)
-        rows.append(mk("vallisse.com", "Web Thuần Hân", "đã set up"))       # 1404 skip
+        rows.append(mk("testc.com", "Web Thuần Hân", "Cần set up"))   # 1402
+        rows.append(mk("teste.com", "Web Thuần Hân", ""))                # 1403 bo qua (J trong)
+        rows.append(mk("testd.com", "Web Thuần Hân", "đã set up"))       # 1404 skip
         rows.append(mk("conflict41.com", "Web Thuần Long", "Cần set up"))   # 1405 review
         rows.append(mk("unmapped41.com", "Web Thuần", "Cần set up"))        # 1406 skip (chua co rule)
-        rows.append(mk("stylenora.com", "Web Thuần Hân", "Cần set up"))    # 1407 trung, giu dong cuoi
+        rows.append(mk("testc.com", "Web Thuần Hân", "Cần set up"))    # 1407 trung, giu dong cuoi
         return rows
     dash._sheet_fetch_csv = fake_csv
     # conflict41.com dang dung 'Web Chi Han' (se xung dot voi 'Web Anh Long' trong sheet).
     z41, _c = cf.get_or_create_zone("conflict41.com")
-    cf.create_record(z41["id"], "A", "conflict41.com", "134.209.163.195", True)
-    cf.create_record(z41["id"], "A", "www.conflict41.com", "134.209.163.195", True)
+    cf.create_record(z41["id"], "A", "conflict41.com", "203.0.113.10", True)
+    cf.create_record(z41["id"], "A", "www.conflict41.com", "203.0.113.10", True)
     st41 = {}
     dash._save_check_result(st41, "conflict41.com",
                             dash.check_domain("conflict41.com", cfg41, skip_nc=True))
@@ -1104,11 +1104,11 @@ def main():
     rows41, err41, src41 = dash.sheet_read_rows(cfg41)
     assert not err41 and src41 == "csv", (err41, src41)  # chua co sheet_id/sa_key -> CSV
     by41 = {r["domain"]: r for r in rows41}
-    assert set(by41) == {"stylenora.com", "vallisse.com", "conflict41.com", "unmapped41.com"}, by41
-    assert by41["stylenora.com"]["row"] == 1407, by41["stylenora.com"]  # trung -> giu dong cuoi
+    assert set(by41) == {"testc.com", "testd.com", "conflict41.com", "unmapped41.com"}, by41
+    assert by41["testc.com"]["row"] == 1407, by41["testc.com"]  # trung -> giu dong cuoi
     cls41 = dash._sheet_classify(rows41, cfg41, st41)
     act41 = {r["domain"]: r["action"] for r in cls41}
-    assert act41 == {"stylenora.com": "setup", "vallisse.com": "skip",
+    assert act41 == {"testc.com": "setup", "testd.com": "skip",
                      "conflict41.com": "review", "unmapped41.com": "skip"}, act41
     # Rule doi ten duoc: _sheet_preset_for doc tu cfg (khong cung SHEET_MAP).
     assert dash._sheet_preset_for("Web Thuần Hân", cfg41) == "Web Chị Hân"
@@ -1116,21 +1116,21 @@ def main():
     assert dash._sheet_preset_for("Web Thuần Hân", cfg41) is None
     assert dash._sheet_preset_for("Web Thuần Hân Mới", cfg41) == "Web Anh Long"
     cfg41["sheet_rules"][0] = {"name": "Web Thuần Hân", "preset": "Web Chị Hân"}
-    # Setup 1 hang: stylenora.com (clean) -> xong + ghi 'da set up' ve cot J (mock).
-    STATE["nc_ns"]["stylenora.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    # Setup 1 hang: testc.com (clean) -> xong + ghi 'da set up' ve cot J (mock).
+    STATE["nc_ns"]["testc.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
     written = []
     _real_write = dash.sheet_write_status
     def fake_write(row, value, cfg):
         written.append((row, value))
         return True, "ok"
     dash.sheet_write_status = fake_write
-    one41 = dash._sheet_setup_one("stylenora.com", 1407, "Web Chị Hân", cfg41, st41)
+    one41 = dash._sheet_setup_one("testc.com", 1407, "Web Chị Hân", cfg41, st41)
     assert one41["action"] == "done", one41
     assert written == [(1407, "Đã set up")], written  # ghi dung dropdown cua user
-    z41b, _c = cf.get_or_create_zone("stylenora.com")
-    assert any(x["type"] == "A" and x["content"] == "134.209.163.195"
+    z41b, _c = cf.get_or_create_zone("testc.com")
+    assert any(x["type"] == "A" and x["content"] == "203.0.113.10"
                for x in cf.list_records(z41b["id"])), cf.list_records(z41b["id"])
-    # Batch: conflict vao hang cho duyet, unmapped/vallisse skip, stylenora setup lai (da co preset).
+    # Batch: conflict vao hang cho duyet, unmapped/testd skip, testc setup lai (da co preset).
     res41 = dash.sheet_setup_clean(cfg41, st41)
     assert res41["ok"], res41
     assert [q["domain"] for q in res41["queued"]] == ["conflict41.com"], res41
@@ -1201,7 +1201,7 @@ def main():
     dash._sheet_fetch_api = lambda cfg: (_ for _ in ()).throw(RuntimeError("api down"))
     rows42b, err42b, src42b = dash.sheet_read_rows(cfg42)
     assert not err42b and src42b == "csv", (err42b, src42b)
-    assert "stylenora.com" in {r["domain"] for r in rows42b}, rows42b
+    assert "testc.com" in {r["domain"] for r in rows42b}, rows42b
     # Khong co sheet_id/sa_key -> CSV thang.
     cfg42["sheet_id"] = ""
     rows42c, err42c, src42c = dash.sheet_read_rows(cfg42)
@@ -1232,8 +1232,8 @@ def main():
     dash._sheet_fetch_csv = fake_csv43
     # auto5.com dang dung 'Web Chi Han' (sheet muon 'Web Anh Long' -> cho duyet, khong tu setup).
     z43, _c = cf.get_or_create_zone("auto5.com")
-    cf.create_record(z43["id"], "A", "auto5.com", "134.209.163.195", True)
-    cf.create_record(z43["id"], "A", "www.auto5.com", "134.209.163.195", True)
+    cf.create_record(z43["id"], "A", "auto5.com", "203.0.113.10", True)
+    cf.create_record(z43["id"], "A", "www.auto5.com", "203.0.113.10", True)
     st43 = {}
     dash._save_check_result(st43, "auto5.com",
                             dash.check_domain("auto5.com", cfg43, skip_nc=True))
@@ -1323,7 +1323,7 @@ def main():
     for d, txt in [("done45.com", "00000000-1111-2222-3333-444455556666"),
                    ("done45b.com", "11112222-3333-4444-5555-666677778888")]:
         z, _c = cf.get_or_create_zone(d)
-        cf.create_record(z["id"], "CNAME", d, "stores.sarivon.com", True)
+        cf.create_record(z["id"], "CNAME", d, "stores.shophost.com", True)
         cf.create_record(z["id"], "TXT", "_cf-custom-hostname." + d, txt, False)
     st45 = {}
     for d in ("done45.com", "done45b.com"):
@@ -1346,7 +1346,7 @@ def main():
     recs45 = cf.list_records(z45["id"])
     assert any(x["type"] == "TXT" and x["name"] == "_cf-custom-hostname.long45.com"
                and x["content"] == "5c8a9551-74a3-453d-a6cb-2608d44de0a5" for x in recs45), recs45
-    assert any(x["type"] == "CNAME" and x["content"] == "stores.sarivon.com" for x in recs45), recs45
+    assert any(x["type"] == "CNAME" and x["content"] == "stores.shophost.com" for x in recs45), recs45
     # long45b.com (cot L trong) -> chi CNAME, khong co TXT.
     one45b = dash._sheet_setup_one("long45b.com", 1403, "Web Anh Long", cfg45, st45, custom_id="")
     assert one45b["action"] == "done", one45b
