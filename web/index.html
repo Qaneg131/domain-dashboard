@@ -47,7 +47,9 @@
   .stat.current { background: #fdf6ec; border-color: #cf9a5f; color: #16130f; font-weight: 700; }
   /* Dong thong ke Google Sheet: so domain theo trang thai, nhin la thay ngay. */
   .sheet-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-  .sheet-stat { flex: 1; min-width: 100px; background: #fffdf9; border: 1px solid #e3ddd2; border-radius: 10px; padding: 10px 12px; text-align: center; }
+  .sheet-stat { flex: 1; min-width: 100px; background: #fffdf9; border: 1px solid #e3ddd2; border-radius: 10px; padding: 10px 12px; text-align: center; cursor: pointer; user-select: none; transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease, background .12s ease; }
+  .sheet-stat:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(22,19,15,.12); border-color: #cf9a5f; }
+  .sheet-stat.active { border-color: #a06a35; background: #fdf6ec; box-shadow: 0 0 0 2px rgba(160,106,53,.28); }
   .sheet-stat .num { display: block; font-size: 26px; font-weight: 700; line-height: 1.15; color: #16130f; }
   .sheet-stat .lbl { font-size: 12px; color: #857c6f; }
   .sheet-stat.main { background: #fdf6ec; border-color: #cf9a5f; }
@@ -55,6 +57,11 @@
   .sheet-stat.warn .num { color: #b45309; }
   .sheet-stat.ok .num { color: #15803d; }
   .sheet-stat.err .num { color: #b3261e; }
+  /* Bang ket qua sheet: header dam, dong hover, bo tron. */
+  .tbl { border: 1px solid #e8e1d5; border-radius: 10px; overflow: hidden; }
+  .tbl th { background: #f5f2ed; }
+  .tbl tbody tr:hover { background: #fdf6ec; }
+  .tbl td .small { margin-left: 6px; }
   /* Thanh thao tac hang loat: noi bat khi co domain duoc chon, nut nguy hiem tach rieng ben phai. */
   .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #f5f2ed; border: 1px solid #e8e1d5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .bulkbar.has-sel { background: #fdf6ec; border-color: #cf9a5f; }
@@ -211,11 +218,11 @@
       <span class="muted" id="sheetAutoMsg"></span>
     </div>
     <div class="sheet-stats" id="sheetStats" style="display:none">
-      <div class="sheet-stat main"><span class="num" id="sheetCountSetup">0</span><span class="lbl">Sẽ setup</span></div>
-      <div class="sheet-stat warn"><span class="num" id="sheetCountReview">0</span><span class="lbl">Chờ duyệt</span></div>
-      <div class="sheet-stat ok"><span class="num" id="sheetCountDone">0</span><span class="lbl">Đã set up</span></div>
-      <div class="sheet-stat"><span class="num" id="sheetCountSkip">0</span><span class="lbl">Bỏ qua</span></div>
-      <div class="sheet-stat err" id="sheetStatError" style="display:none"><span class="num" id="sheetCountError">0</span><span class="lbl">Lỗi</span></div>
+      <div class="sheet-stat main" id="sheetStatSetup" onclick="setSheetFilter('setup')" title="Bấm để chỉ hiện domain sẽ setup"><span class="num" id="sheetCountSetup">0</span><span class="lbl">Sẽ setup</span></div>
+      <div class="sheet-stat warn" id="sheetStatReview" onclick="setSheetFilter('review')" title="Bấm để chỉ hiện domain chờ duyệt"><span class="num" id="sheetCountReview">0</span><span class="lbl">Chờ duyệt</span></div>
+      <div class="sheet-stat ok" id="sheetStatDone" onclick="setSheetFilter('done')" title="Bấm để chỉ hiện domain đã set up"><span class="num" id="sheetCountDone">0</span><span class="lbl">Đã set up</span></div>
+      <div class="sheet-stat" id="sheetStatSkip" onclick="setSheetFilter('skip')" title="Bấm để chỉ hiện domain bỏ qua"><span class="num" id="sheetCountSkip">0</span><span class="lbl">Bỏ qua</span></div>
+      <div class="sheet-stat err" id="sheetStatError" style="display:none" onclick="setSheetFilter('error')" title="Bấm để chỉ hiện domain bị lỗi"><span class="num" id="sheetCountError">0</span><span class="lbl">Lỗi</span></div>
     </div>
     <div id="sheetResults" style="margin-top:10px"></div>
     <h3 style="margin:14px 0 6px">Chờ duyệt — domain xung đột preset</h3>
@@ -227,9 +234,6 @@
     <div id="managedTab">
     <div class="toolbar">
       <div class="tb-group">
-        <input type="text" id="newDomain" placeholder="vd: elvellia.com (Enter để thêm)" style="width:270px">
-        <button onclick="addDomain()">Thêm domain</button>
-        <span class="tb-sep"></span>
         <input type="text" id="domainSearch" placeholder="Tìm domain…" style="width:270px" oninput="MANAGED_PAGE=1;renderTable()">
       </div>
       <div class="tb-group">
@@ -567,6 +571,22 @@ async function askPresetMismatch(domains, selected) {
 }
 // --- Google Sheet ---
 let SHEET_ROWS = [];
+let SHEET_FILTER = null;  // null = hien tat ca; 'setup'/'review'/'done'/'skip'/'error' = chi hien trang thai do
+function sheetRowState(r) {
+  // Trang thai hien thi cua 1 dong sheet (dung chung cho dem + loc):
+  // 'skip' tach thanh 'done' (cot J da la Da setup) hoac 'skip' (bo qua that).
+  const a = r.action;
+  if (a === 'skip') {
+    return (r.status_j || '').toLowerCase().replace(/[\s\-_]/g, '') === 'đãsetup' ? 'done' : 'skip';
+  }
+  return a;
+}
+function setSheetFilter(state) {
+  // Bam o thong ke de loc bang; bam lai o dang chon thi bo loc (hien tat ca).
+  SHEET_FILTER = (SHEET_FILTER === state) ? null : state;
+  renderSheetStats();
+  renderSheetResults();
+}
 let SHEET_STOP = false;
 let SHEET_EDIT_IDX = -1;
 
@@ -645,28 +665,56 @@ async function deleteSheetRule(i) {
 }
 function sheetRowHtml(r) {
   const act = { setup: 'Sẽ setup', review: 'Chờ duyệt', skip: 'Bỏ qua', done: 'Xong', error: 'Lỗi', running: 'Đang setup…' }[r._state || r.action] || r.action;
-  return `<tr><td>${r.row}</td><td>${esc(r.domain)}</td><td>${esc(r.loai || '')}</td><td>${esc(r.preset || '')}</td><td>${esc(r.status_j)}</td><td>${esc(act)}</td><td>${esc(r.detail || '')}</td></tr>`;
+  let extra = '';
+  if (sheetRowState(r) === 'skip') {
+    // Dong Bo qua: bam de setup lai. Co preset thi setup ngay; chua map preset
+    // thi chon preset roi setup.
+    const presets = Object.keys(STATE.config.presets || {});
+    if (r.preset) {
+      extra = ` <button class="small" onclick="setupSheetRowAgain('${esc(r.domain)}', ${r.row}, '${esc(r.preset)}')">Setup lại</button>`;
+    } else {
+      extra = ` <select id="retryPreset-${esc(r.domain)}">${presets.map(p => `<option>${esc(p)}</option>`).join('')}</select><button class="small" onclick="setupSheetRowAgain('${esc(r.domain)}', ${r.row}, document.getElementById('retryPreset-${esc(r.domain)}').value)">Setup</button>`;
+    }
+  }
+  return `<tr><td>${r.row}</td><td>${esc(r.domain)}</td><td>${esc(r.loai || '')}</td><td>${esc(r.preset || '')}</td><td>${esc(r.status_j)}</td><td>${esc(act)}</td><td>${esc(r.detail || '')}${extra}</td></tr>`;
+}
+async function setupSheetRowAgain(domain, row, preset) {
+  // Setup lai 1 dong Bo qua (co the la dong tung bi tu choi — backend se go khoi
+  // danh sach da tu choi). Xong thi cap nhat dong + so lieu ngay.
+  const r = SHEET_ROWS.find(x => x.domain === domain);
+  if (r) { r._state = 'running'; renderSheetResults(); }
+  const res = await api('/api/sheet-setup-one', { domain, row, preset });
+  const out = res.result || {};
+  if (r) {
+    r._state = out.action || 'error';
+    r.action = out.action || r.action;
+    r.detail = out.detail || (res.error || '');
+    renderSheetResults();
+    renderSheetStats();
+  }
 }
 function renderSheetResults() {
   const box = document.getElementById('sheetResults');
   if (!SHEET_ROWS.length) { box.innerHTML = ''; return; }
-  box.innerHTML = `<table class="tbl"><thead><tr><th>Dòng</th><th>Domain</th><th>Loại web</th><th>Preset</th><th>Cột J</th><th>Hành động</th><th>Ghi chú</th></tr></thead><tbody>${SHEET_ROWS.map(sheetRowHtml).join('')}</tbody></table>`;
+  const rows = SHEET_FILTER ? SHEET_ROWS.filter(r => sheetRowState(r) === SHEET_FILTER) : SHEET_ROWS;
+  const label = { setup: 'Sẽ setup', review: 'Chờ duyệt', done: 'Đã set up', skip: 'Bỏ qua', error: 'Lỗi' }[SHEET_FILTER];
+  const note = SHEET_FILTER
+    ? `<p class="muted">Đang lọc: <b>${label}</b> — ${rows.length} domain. <a href="#" onclick="setSheetFilter('${SHEET_FILTER}');return false;">Hiện tất cả</a></p>`
+    : '';
+  box.innerHTML = note + (rows.length
+    ? `<table class="tbl"><thead><tr><th>Dòng</th><th>Domain</th><th>Loại web</th><th>Preset</th><th>Cột J</th><th>Hành động</th><th>Ghi chú</th></tr></thead><tbody>${rows.map(sheetRowHtml).join('')}</tbody></table>`
+    : `<p class="muted">Không có domain nào ở trạng thái này.</p>`);
 }
 function renderSheetStats() {
   // Dem domain theo trang thai tu SHEET_ROWS (cap nhat ca khi dang setup tung hang).
   const box = document.getElementById('sheetStats');
   if (!SHEET_ROWS.length) { box.style.display = 'none'; return; }
   const n = { setup: 0, review: 0, done: 0, skip: 0, error: 0 };
-  for (const r of SHEET_ROWS) {
-    if (r.action === 'setup') n.setup++;
-    else if (r.action === 'review') n.review++;
-    else if (r.action === 'done') n.done++;
-    else if (r.action === 'error') n.error++;
-    else if (r.action === 'skip') {
-      // Chuan hoa nhu backend: 'Da setup'/'da set up' deu tinh la da xong.
-      if ((r.status_j || '').toLowerCase().replace(/[\s\-_]/g, '') === 'đãsetup') n.done++;
-      else n.skip++;
-    }
+  for (const r of SHEET_ROWS) n[sheetRowState(r)]++;
+  // Danh dau o dang duoc bam de loc bang.
+  for (const [key, id] of [['setup', 'sheetStatSetup'], ['review', 'sheetStatReview'], ['done', 'sheetStatDone'], ['skip', 'sheetStatSkip'], ['error', 'sheetStatError']]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', SHEET_FILTER === key);
   }
   document.getElementById('sheetCountSetup').textContent = n.setup;
   document.getElementById('sheetCountReview').textContent = n.review;
@@ -1397,17 +1445,6 @@ async function saveGscModal() {
   }
 }
 
-async function addDomain() {
-  const d = document.getElementById('newDomain').value.trim().toLowerCase();
-  if (!d) return;
-  const res = await api('/api/domains', { domain: d });
-  if (res.error) { alert(res.error); return; }
-  STATE.config.domains = res.domains;
-  document.getElementById('newDomain').value = '';
-  renderTable();
-  notify('Đã thêm domain', `Đã thêm <b>${esc(d)}</b> vào bảng quản lý.`);
-}
-document.getElementById('newDomain').addEventListener('keydown', e => { if (e.key === 'Enter') addDomain(); });
 async function removeDomain(d) {
   if (!confirm(`Xóa ${d} khỏi danh sách? (không xóa zone/record thật)`)) return;
   const res = await api('/api/domains/delete', { domain: d });

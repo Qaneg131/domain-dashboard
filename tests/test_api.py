@@ -1277,6 +1277,22 @@ def main():
     dash.sheet_write_status = _real_write  # khoi phuc
     print("  OK", flush=True)
 
+    print("TEST 44: Setup lai dong Bo qua (tung bi tu choi) thi go khoi danh sach da tu choi...", flush=True)
+    cfg44 = dict(cfg41)
+    cfg44["sheet_ignored"] = ["retry44.com"]
+    STATE["nc_ns"]["retry44.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    written44 = []
+    def fake_write44(row, value, cfg):
+        written44.append((row, value))
+        return True, "ok"
+    dash.sheet_write_status = fake_write44
+    one44 = dash._sheet_setup_one("retry44.com", 1500, "Web Chị Hân", cfg44, {})
+    assert one44["action"] == "done", one44
+    assert "retry44.com" not in cfg44["sheet_ignored"], cfg44["sheet_ignored"]
+    assert written44 == [(1500, "Đã setup")], written44
+    dash.sheet_write_status = _real_write
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

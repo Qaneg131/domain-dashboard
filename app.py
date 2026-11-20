@@ -948,7 +948,12 @@ def _sheet_classify(rows, cfg, st):
 
 def _sheet_setup_one(domain, row, preset, cfg, st):
     """Setup 1 dong sheet: chay setup_domain, neu ok thi ghi 'da set up'
-    ve cot J cua dong do. Tra ve {domain, row, preset, action, detail}."""
+    ve cot J cua dong do. Tra ve {domain, row, preset, action, detail}.
+    Neu domain tung bi tu choi (trong sheet_ignored) thi go ra khoi danh
+    sach do — user da chu dong setup lai."""
+    ignored = cfg.get("sheet_ignored") or []
+    if domain in ignored:
+        cfg["sheet_ignored"] = [d for d in ignored if d != domain]
     res = setup_domain(domain, preset, cfg)
     _save_check_result(st, domain, check_domain(domain, cfg, skip_nc=True))
     if res.get("ok"):
