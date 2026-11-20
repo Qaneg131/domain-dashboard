@@ -701,6 +701,56 @@ def _sheet_preset_for(loai, cfg):
 SHEET_WANT = ("cần set up", "đã set up")
 
 
+# Base URL Sheets API — doi duoc qua env SHEETS_API_BASE (de test voi mock).
+SHEETS_API_BASE = os.environ.get("SHEETS_API_BASE",
+                                 "https://sheets.googleapis.com")
+
+
+def _sheet_cell(r, idx):
+    """Lay o tai vi tri idx, thieu thi tra ve '' (API co the tra dong ngan)."""
+    return (r[idx] if idx < len(r) else "") or ""
+
+
+def _sheet_gid(cfg):
+    """GID cua tab trong link CSV publish (neu co)."""
+    import urllib.parse
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(
+        cfg.get("sheet_csv_url") or "").query)
+    if q.get("gid"):
+        try:
+            return int(q["gid"][0])
+        except ValueError:
+            return None
+    return None
+
+
+def _sheet_tab_name(cfg, token):
+    """Ten tab de doc/ghi: tim theo gid trong link CSV, mac dinh tab dau tien.
+    Tra ve (ten_tab, error)."""
+    import json as _json
+    import urllib.request
+    sheet_id = (cfg.get("sheet_id") or "").strip()
+    if not sheet_id:
+        return None, "chưa nhập Sheet ID"
+    try:
+        req = urllib.request.Request(
+            SHEETS_API_BASE + "/v4/spreadsheets/" + sheet_id,
+            headers={"Authorization": "Bearer " + token})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            meta = _json.loads(r.read().decode())
+    except Exception as e:
+        return None, f"không đọc được danh sách tab: {e}"
+    sheets = meta.get("sheets") or []
+    gid = _sheet_gid(cfg)
+    if gid is not None:
+        for sh in sheets:
+            if sh.get("properties", {}).get("sheetId") == gid:
+                return sh["properties"].get("title"), ""
+    if sheets:
+        return sheets[0].get("properties", {}).get("title"), ""
+    return None, "không tìm được tab nào trong sheet"
+
+
 def _sheet_fetch_csv(url):
     """Tai CSV publish ve, tra ve list cac row (list of str)."""
     import csv
@@ -712,39 +762,74 @@ def _sheet_fetch_csv(url):
     return list(csv.reader(io.StringIO(text)))
 
 
+def _sheet_fetch_api(cfg):
+    """Doc sheet TRUC TIEP qua Sheets API (du lieu live, khong qua cache
+    cua link publish). Can sheet_id + service account. Tra ve list cac row
+    (list of str), dong 1 la header."""
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    token = _sa_access_token(cfg)
+    tab, err = _sheet_tab_name(cfg, token)
+    if err:
+        raise RuntimeError(err)
+    # Ten tab luon boc trong dau ' (thoat ' bang '').
+    disp = "'" + tab.replace("'", "''") + "'"
+    rng = urllib.parse.quote(disp + "!A1:Z")
+    req = urllib.request.Request(
+        SHEETS_API_BASE + "/v4/spreadsheets/" +
+        (cfg.get("sheet_id") or "").strip() + "/values/" + rng,
+        headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = _json.loads(r.read().decode())
+    rows = data.get("values") or []
+    return [[str(c) for c in row] for row in rows]
+
+
 def sheet_read_rows(cfg):
     """Doc sheet tu start_row tro xuong, chi lay B (domain), H (loai web),
     J (trang thai). Chi giu cac dong co J = 'can set up' hoac 'da set up'
     (so sanh khong phan biet hoa/thuong). Trung domain thi giu dong CUOI
-    (moi nhat). Tra ve (rows, error) — rows: [{row, domain, loai, preset,
-    status_j}]."""
-    url = (cfg.get("sheet_csv_url") or "").strip()
-    if not url:
-        return [], "chưa nhập link CSV publish của sheet"
+    (moi nhat). Uu tien doc qua Sheets API (live) khi da nhap Sheet ID +
+    file JSON key service account; neu API loi thi tu fallback ve link CSV
+    publish. Tra ve (rows, error, source) — source: 'api' | 'csv';
+    rows: [{row, domain, loai, preset, status_j}]."""
     try:
         start = int(cfg.get("sheet_start_row") or 1)
     except (TypeError, ValueError):
         start = 1
-    try:
-        all_rows = _sheet_fetch_csv(url)
-    except Exception as e:
-        return [], f"không tải được sheet: {e}"
+    all_rows, source, api_err = None, "csv", ""
+    if (cfg.get("sheet_id") or "").strip() and (cfg.get("sheet_sa_key") or "").strip():
+        try:
+            all_rows = _sheet_fetch_api(cfg)
+            source = "api"
+        except Exception as e:
+            api_err = str(e)
+    if all_rows is None:
+        url = (cfg.get("sheet_csv_url") or "").strip()
+        if not url:
+            return [], ("chưa nhập link CSV publish của sheet"
+                       + (f" (API lỗi: {api_err})" if api_err else "")), source
+        try:
+            all_rows = _sheet_fetch_csv(url)
+        except Exception as e:
+            return [], f"không tải được sheet: {e}" + (f" (API lỗi: {api_err})" if api_err else ""), source
     by_domain = {}
     for idx, r in enumerate(all_rows):
         row_no = idx + 1
-        if row_no < start or len(r) <= 9:
+        if row_no < start:
             continue
-        domain = (r[1] or "").strip().lower()
+        domain = _sheet_cell(r, 1).strip().lower()
         if not domain or "." not in domain:
             continue
-        status_j = (r[9] or "").strip()
+        status_j = _sheet_cell(r, 9).strip()
         if status_j.lower() not in SHEET_WANT:
             continue
-        loai = (r[7] or "").strip()
+        loai = _sheet_cell(r, 7).strip()
         by_domain[domain] = {"row": row_no, "domain": domain, "loai": loai,
                              "preset": None,  # gan sau o _sheet_classify
                              "status_j": status_j}
-    return list(by_domain.values()), ""
+    return list(by_domain.values()), "", source
 
 
 def _sheet_current_preset(domain, cfg, st):
@@ -792,43 +877,18 @@ def sheet_write_status(row, value, cfg):
         return False, "chưa cài thư viện google-auth — chạy: pip install google-auth"
     except Exception as e:
         return False, str(e)
+    tab, tab_err = _sheet_tab_name(cfg, token)
+    if tab_err:
+        return False, tab_err
     import json as _json
     import urllib.parse
     import urllib.request
-    # Ten tab: tim theo gid trong link CSV, mac dinh tab dau tien.
-    gid = None
-    q = urllib.parse.parse_qs(urllib.parse.urlparse(
-        cfg.get("sheet_csv_url") or "").query)
-    if q.get("gid"):
-        try:
-            gid = int(q["gid"][0])
-        except ValueError:
-            gid = None
-    tab = None
-    try:
-        req = urllib.request.Request(
-            "https://sheets.googleapis.com/v4/spreadsheets/" + sheet_id,
-            headers={"Authorization": "Bearer " + token})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            meta = _json.loads(r.read().decode())
-        sheets = meta.get("sheets") or []
-        if gid is not None:
-            for sh in sheets:
-                if sh.get("properties", {}).get("sheetId") == gid:
-                    tab = sh["properties"].get("title")
-                    break
-        if not tab and sheets:
-            tab = sheets[0].get("properties", {}).get("title")
-    except Exception as e:
-        return False, f"không đọc được danh sách tab: {e}"
-    if not tab:
-        return False, "không tìm được tab nào trong sheet"
     # Ten tab luon boc trong dau ' (thoat ' bang ''), hop le ca khi khong co khoang trang.
     disp = "'" + tab.replace("'", "''") + "'"
     rng = f"{disp}!J{row}"
     body = _json.dumps({"range": rng, "majorDimension": "ROWS",
                         "values": [[value]]}).encode()
-    url = ("https://sheets.googleapis.com/v4/spreadsheets/" + sheet_id +
+    url = (SHEETS_API_BASE + "/v4/spreadsheets/" + sheet_id +
            "/values/" + urllib.parse.quote(rng) + "?valueInputOption=RAW")
     try:
         req = urllib.request.Request(
@@ -899,7 +959,7 @@ def sheet_setup_clean(cfg, st):
     khi xong. Domain xung dot thi dua vao hang cho duyet.
     Tra ve {ok, results:[{domain,row,preset,action,detail}], queued}.
     Luu config (hang cho duyet) + status."""
-    rows, err = sheet_read_rows(cfg)
+    rows, err, _src = sheet_read_rows(cfg)
     if err:
         return {"ok": False, "error": err}
     rows = _sheet_classify(rows, cfg, st)
@@ -1724,7 +1784,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/sheet-read":
                 # Doc sheet + phan loai (khong setup) — de xem truoc.
                 # Dong xung dot thi dua luon vao hang cho duyet.
-                rows, err = sheet_read_rows(cfg)
+                rows, err, src = sheet_read_rows(cfg)
                 if err:
                     self._json({"ok": False, "error": err})
                     return
@@ -1739,7 +1799,8 @@ class Handler(BaseHTTPRequestHandler):
                             review.append(q)
                 save_config(cfg)
                 save_status(st)
-                self._json({"ok": True, "rows": rows, "review": review})
+                self._json({"ok": True, "rows": rows, "review": review,
+                            "source": src})
             elif path == "/api/sheet-setup":
                 # Setup tuan tu tung dong clean (xong 1 moi qua dong sau).
                 res = sheet_setup_clean(cfg, st)

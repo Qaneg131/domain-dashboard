@@ -1101,8 +1101,8 @@ def main():
     dash._save_check_result(st41, "conflict41.com",
                             dash.check_domain("conflict41.com", cfg41, skip_nc=True))
     assert st41["conflict41.com"].get("records_preset") == "Web Chị Hân", st41
-    rows41, err41 = dash.sheet_read_rows(cfg41)
-    assert not err41, err41
+    rows41, err41, src41 = dash.sheet_read_rows(cfg41)
+    assert not err41 and src41 == "csv", (err41, src41)  # chua co sheet_id/sa_key -> CSV
     by41 = {r["domain"]: r for r in rows41}
     assert set(by41) == {"stylenora.com", "vallisse.com", "conflict41.com", "unmapped41.com"}, by41
     assert by41["stylenora.com"]["row"] == 1407, by41["stylenora.com"]  # trung -> giu dong cuoi
@@ -1119,6 +1119,7 @@ def main():
     # Setup 1 hang: stylenora.com (clean) -> xong + ghi 'da set up' ve cot J (mock).
     STATE["nc_ns"]["stylenora.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
     written = []
+    _real_write = dash.sheet_write_status
     def fake_write(row, value, cfg):
         written.append((row, value))
         return True, "ok"
@@ -1134,6 +1135,78 @@ def main():
     assert res41["ok"], res41
     assert [q["domain"] for q in res41["queued"]] == ["conflict41.com"], res41
     assert any(q["domain"] == "conflict41.com" for q in cfg41["sheet_review"]), cfg41["sheet_review"]
+    dash.sheet_write_status = _real_write  # khoi phuc de TEST 42 dung ham that
+    print("  OK", flush=True)
+
+    print("TEST 42: Google Sheet — doc qua Sheets API (live), fallback CSV, ghi cot J...", flush=True)
+    import json as _json
+    from http.server import BaseHTTPRequestHandler
+    put_seen = []
+    class SheetsHandler(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _send(self, obj, code=200):
+            data = _json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        def do_GET(self):
+            if "/values/" in self.path:
+                self._send({"values": [
+                    ["", "Tên Domain", "Hạn Domain", "DaysLeft", "LLC", "Address",
+                     "Số lần làm lại web", "Loại web", "Tên Dev", "Đã hoàn thành"],
+                    ["", "apinora.com", "", "", "", "", "", "Web Thuần Hân", "", "Cần set up"],
+                    ["", "apilong.com", "", "", "", "", "", "Web Thuần Long", "", "Cần set up"],
+                    ["", "short.com", "Web Thuần Hân"],  # dong ngan (thieu cot J)
+                ]})
+            elif self.path.startswith("/v4/spreadsheets/"):
+                self._send({"sheets": [
+                    {"properties": {"sheetId": 724861620, "title": "Danh sách"}},
+                    {"properties": {"sheetId": 123, "title": "Khác"}}]})
+            else:
+                self.send_response(404); self.end_headers()
+        def do_PUT(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            put_seen.append((self.path, _json.loads(self.rfile.read(n).decode())))
+            self._send({"updatedCells": 1})
+    sh_srv = ThreadingHTTPServer(("127.0.0.1", 18098), SheetsHandler)
+    threading.Thread(target=sh_srv.serve_forever, daemon=True).start()
+    dash.SHEETS_API_BASE = "http://127.0.0.1:18098"
+    dash._sa_access_token = lambda cfg: "test-token"
+    cfg42 = dict(cfg41)
+    cfg42["sheet_id"] = "test-sheet-id"
+    cfg42["sheet_sa_key"] = "/tmp/fake-sa.json"
+    cfg42["sheet_start_row"] = 2  # mock API chi tra 4 dong (header + 3 dong)
+    cfg42["sheet_csv_url"] = ("https://docs.google.com/spreadsheets/d/e/2PACX-1vX/pub"
+                              "?gid=724861620&single=true&output=csv")
+    # fallback dung fake_csv cua TEST 41 nhung khong kiem tra URL (cfg42 doi URL de test gid).
+    _fake_csv41 = fake_csv
+    dash._sheet_fetch_csv = lambda url: _fake_csv41("http://example.invalid/sheet.csv")
+    # _sheet_fetch_api: tim dung tab theo gid + tra ve rows.
+    api_rows = dash._sheet_fetch_api(cfg42)
+    assert api_rows[1][1] == "apinora.com", api_rows
+    assert api_rows[3][1] == "short.com", api_rows
+    # sheet_read_rows uu tien API khi co sheet_id + sa_key.
+    rows42, err42, src42 = dash.sheet_read_rows(cfg42)
+    assert not err42 and src42 == "api", (err42, src42)
+    assert {r["domain"] for r in rows42} == {"apinora.com", "apilong.com"}, rows42
+    # Ghi cot J qua API: PUT dung range (tab theo gid) + gia tri.
+    ok42, det42 = dash.sheet_write_status(1402, "đã set up", cfg42)
+    assert ok42, det42
+    assert len(put_seen) == 1 and "J1402" in put_seen[0][0], put_seen
+    assert put_seen[0][1]["values"] == [["đã set up"]], put_seen
+    # API loi -> fallback CSV (van doc duoc, source csv).
+    cfg42["sheet_start_row"] = 1402  # fake_csv co dong 1402+
+    dash._sheet_fetch_api = lambda cfg: (_ for _ in ()).throw(RuntimeError("api down"))
+    rows42b, err42b, src42b = dash.sheet_read_rows(cfg42)
+    assert not err42b and src42b == "csv", (err42b, src42b)
+    assert "stylenora.com" in {r["domain"] for r in rows42b}, rows42b
+    # Khong co sheet_id/sa_key -> CSV thang.
+    cfg42["sheet_id"] = ""
+    rows42c, err42c, src42c = dash.sheet_read_rows(cfg42)
+    assert not err42c and src42c == "csv", (err42c, src42c)
+    sh_srv.shutdown()
     print("  OK", flush=True)
 
     srv.shutdown()

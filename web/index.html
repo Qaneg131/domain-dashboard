@@ -180,7 +180,7 @@
       <button class="secondary" onclick="saveSheetSettings()">Lưu cấu hình sheet</button>
       <span class="muted" id="sheetSettingsMsg"></span>
     </div>
-    <p class="hint">Ghi cột J cần service account (Google Cloud → tạo service account → tải JSON key → share sheet quyền Editor) và <code>pip install google-auth</code>. Chưa có key thì vẫn đọc sheet + setup được, chỉ không ghi được cột J (log sẽ báo rõ).</p>
+    <p class="hint">Nhập <b>Sheet ID + file JSON key service account</b> thì dashboard đọc sheet <b>trực tiếp qua Sheets API (live, sửa sheet là thấy ngay)</b> và ghi được cột J. Chưa có key thì vẫn đọc qua link CSV publish (Google cache vài phút) + setup được, chỉ không ghi được cột J (log sẽ báo rõ). Cần: Google Cloud → bật <b>Google Sheets API</b> → tạo <b>service account</b> → tải JSON key → share sheet cho email service account quyền <b>Editor</b>; <code>pip install google-auth</code> (run.bat tự cài nếu thiếu).</p>
     <h3 style="margin:14px 0 6px">Rule — Loại web trong sheet → Preset</h3>
     <div id="sheetRules"></div>
     <div class="row">
@@ -623,7 +623,8 @@ async function readSheet() {
   SHEET_ROWS = res.rows || [];
   const nSetup = SHEET_ROWS.filter(r => r.action === 'setup').length;
   const nReview = SHEET_ROWS.filter(r => r.action === 'review').length;
-  document.getElementById('sheetMsg').textContent = `Đọc xong: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
+  const src = res.source === 'api' ? 'Sheets API (live)' : 'link CSV publish (có thể chậm vài phút so với sheet)';
+  document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
   if (res.review) STATE.config.sheet_review = res.review;
   renderSheetResults();
   renderSheetReview();
