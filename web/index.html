@@ -258,6 +258,7 @@
         <span class="stat err" id="errorCount"></span>
         <button class="secondary" onclick="checkAll()">Kiểm tra tất cả</button>
         <button class="secondary" onclick="checkDnsFast()">Kiểm tra nhanh DNS</button>
+        <button class="secondary" onclick="loadExpiry()">Lấy hạn domain</button>
         <button class="secondary small" id="recheckErrorsBtn" style="display:none" onclick="recheckErrors()">Kiểm tra lại domain bị lỗi</button>
         <button class="secondary small" id="batchStopBtn" style="display:none" onclick="stopBatchCheck()">Dừng</button>
         <span class="muted" id="batchProgress"></span>
@@ -269,6 +270,8 @@
       <button class="secondary small" onclick="setupSelected()">Setup đã chọn</button>
       <button class="secondary small" onclick="applyRecordsSelected()">Áp record đã chọn</button>
       <button class="secondary small" onclick="setupEmailSelected()">Setup email đã chọn</button>
+      <button class="secondary small" onclick="setAutoRenewSelected(true)">Bật auto-renew đã chọn</button>
+      <button class="secondary small" onclick="setAutoRenewSelected(false)">Tắt auto-renew đã chọn</button>
       <span class="tb-sep"></span>
       <label>SSL</label>
       <select id="bulkSsl">
@@ -284,13 +287,14 @@
     </div>
     <table>
       <thead>
-        <tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th><a href="#" id="nameSortLabel" onclick="toggleNameSort();return false" title="Bấm để đổi A-Z / Z-A">Name ↑</a></th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th></th></tr>
+        <tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th><a href="#" id="nameSortLabel" onclick="toggleNameSort();return false" title="Bấm để đổi A-Z / Z-A">Name ↑</a></th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th>Hạn</th><th></th></tr>
         <tr><th></th><th></th>
           <th><select id="fltDns" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo DNS"><option value="">Tất cả</option><option value="set">Đã set ✓</option><option value="unset">Chưa set</option><option value="error">Lỗi</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltRec" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Record"><option value="">Tất cả</option><option value="match">Khớp preset ✓</option><option value="nomatch">Chưa khớp</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltEm" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Email routing"><option value="">Tất cả</option><option value="on">Enabled</option><option value="off">Disabled</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltHttps" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo HTTPS"><option value="">Tất cả</option><option value="yes">Yes</option><option value="no">No</option><option value="unknown">Chưa kiểm tra</option></select></th>
           <th><select id="fltCache" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo Cache"><option value="">Tất cả</option><option value="bypass">By Pass</option><option value="no">No</option><option value="unknown">Chưa kiểm tra</option></select></th>
+          <th><select id="fltExp" onchange="MANAGED_PAGE=1;renderTable()" title="Lọc theo hạn domain"><option value="">Tất cả</option><option value="30">Sắp hết ≤ 30 ngày</option><option value="90">Sắp hết ≤ 90 ngày</option><option value="expired">Đã hết hạn</option><option value="unknown">Chưa rõ hạn</option></select></th>
           <th></th></tr>
       </thead>
       <tbody id="domainTable"><tr><td colspan="8" class="muted">Đang tải…</td></tr></tbody>
@@ -495,6 +499,9 @@ async function refresh() {
   // Tai danh sach domain trong tai khoan de hien chung o bang quan ly
   // (chi tai 1 lan; loi thi im lang — bang quan ly van chay duoc).
   if (!ACCOUNT_LOADED) loadAccountZones(true);
+  // Tai han domain 1 lan (Namecheap getList) de hien cot Han; bam
+  // "Lay han domain" de tai lai khi can.
+  if (!EXPIRY_TRIED) { EXPIRY_TRIED = true; loadExpiry(true); }
 }
 
 function renderPresets() {
@@ -981,6 +988,20 @@ async function setAutoRenew(enabled) {
   msg.textContent = lines.join('  •  ');
   notifyResults(`${action} auto-renew xong`, res.results || []);
 }
+// Bat/tat auto-renew cho cac domain dang TICK trong bang quan ly (dung
+// chung endpoint /api/autorenew). Tien khi loc ra domain sap het han
+// o cot Han roi tick het de bat auto-renew cho chung.
+async function setAutoRenewSelected(enabled) {
+  const domains = [...SELECTED].sort();
+  if (!domains.length) { alert('Chưa tick domain nào trong bảng. Tick ô vuông ở đầu mỗi dòng để chọn.'); return; }
+  const action = enabled ? 'BẬT' : 'TẮT';
+  if (!confirm(`${action} auto-renew cho ${domains.length} domain đã chọn:\n${domains.join('\n')}\n\nChạy từng domain một, mỗi domain mất vài giây.`)) return;
+  log(`Đang ${enabled ? 'bật' : 'tắt'} auto-renew cho ${domains.length} domain đã chọn…`);
+  const res = await api('/api/autorenew', { domains, enabled });
+  const lines = (res.results || []).map(r => `${r.ok ? '✓' : '✗'} ${r.domain}: ${r.detail}`);
+  log(lines.join('\n'));
+  notifyResults(`${action} auto-renew đã chọn xong`, res.results || []);
+}
 
 // ---------------------------------------------------------------- account tab
 let ACCOUNT_ZONES = [];
@@ -1043,6 +1064,37 @@ async function autoCheckVisible(names) {
     need.forEach(d => AUTO_CHECKING.delete(d));
   }
 }
+// ---------------------------------------------------------------- han domain (Namecheap)
+// EXPIRY: domain -> ngay het han 'YYYY-MM-DD' (lay tu Namecheap getList).
+let EXPIRY = {};
+let EXPIRY_TRIED = false; // chi tu tai han 1 lan khi mo trang
+async function loadExpiry(quiet) {
+  const res = await api('/api/expiry');
+  if (res.error) { if (!quiet) alert(res.error); return; }
+  EXPIRY = res.expiry || {};
+  const n = Object.keys(EXPIRY).length;
+  log(`Đã lấy hạn của ${n} domain từ Namecheap.`);
+  renderTable();
+}
+// So ngay con lai den ngay het han (am = da het han). null = chua ro han.
+function expiryDays(d) {
+  const iso = EXPIRY[d];
+  if (!iso) return null;
+  const ms = new Date(iso + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime();
+  if (isNaN(ms)) return null;
+  return Math.round(ms / 86400000);
+}
+function expiryCell(d) {
+  const iso = EXPIRY[d];
+  if (!iso) return '<span class="muted">—</span>';
+  const days = expiryDays(d);
+  const dd = iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+  if (days === null) return `<span>${esc(dd)}</span>`;
+  if (days < 0) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">hết hạn ${-days} ngày trước</span>`;
+  if (days <= 30) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+  if (days <= 90) return `<span class="badge wait">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+  return `<span>${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+}
 function managedRow(d) {
     const s = (STATE.status || {})[d] || {};
     const zone = s.zone;
@@ -1080,10 +1132,13 @@ function managedRow(d) {
       : s.cache_bypass === true ? '<span class="badge ok">By Pass</span>'
       : s.cache_bypass === false ? '<span class="badge no">No</span>'
       : '<span class="muted">cần quyền token</span>';
+    // Cot Han: ngay het han lay tu Namecheap (EXPIRY), hien DD/MM/YYYY +
+    // so ngay con lai; do neu sap het (≤30 ngay), cam neu ≤90 ngay.
+    const expCell = expiryCell(d);
     return `<tr>
       <td><input type="checkbox" class="row-check" value="${esc(d)}" ${SELECTED.has(d) ? 'checked' : ''} onchange="toggleSelect(this)"></td>
       <td><b>${esc(d)}</b><br><span class="muted">${esc(s.checked_at || 'chưa kiểm tra')}${s.light ? ' · chỉ DNS' : ''}</span></td>
-      <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td><td>${cacheCell}</td>
+      <td>${dnsCell}</td><td>${recCell}</td><td>${emCell}</td><td>${htCell}</td><td>${cacheCell}</td><td>${expCell}</td>
       <td style="white-space:nowrap">
         <button class="small secondary" onclick="openEdit('${esc(d)}')">Edit</button>
         <button class="small" onclick="setupOne('${esc(d)}')">Setup</button>
@@ -1136,6 +1191,16 @@ function matchesFilters(d) {
       : s.cache_bypass ? 'bypass' : 'no';
     if (state !== cache) return false;
   }
+  const exp = flt('fltExp');
+  if (exp) {
+    const days = expiryDays(d);
+    const state = days === null ? 'unknown'
+      : days < 0 ? 'expired' : days <= 30 ? '30' : days <= 90 ? '90' : 'ok';
+    if (exp === '30' && state !== '30') return false;
+    if (exp === '90' && state !== '30' && state !== '90') return false;
+    if (exp === 'expired' && state !== 'expired') return false;
+    if (exp === 'unknown' && state !== 'unknown') return false;
+  }
   return true;
 }
 function renderTable() {
@@ -1154,7 +1219,7 @@ function renderTable() {
   if (MANAGED_PAGE < 1) MANAGED_PAGE = 1;
   const pageRows = all.slice((MANAGED_PAGE - 1) * PAGE_SIZE, MANAGED_PAGE * PAGE_SIZE);
   tb.innerHTML = pageRows.length ? pageRows.map(d => managedRow(d)).join('')
-    : '<tr><td colspan="8" class="muted">Không tìm thấy domain nào.</td></tr>';
+    : '<tr><td colspan="9" class="muted">Không tìm thấy domain nào.</td></tr>';
   renderPager(totalPages, all.length);
   document.getElementById('checkAll').checked = pageRows.length > 0 && pageRows.every(d => SELECTED.has(d));
   updateSelectedCount();

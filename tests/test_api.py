@@ -202,20 +202,27 @@ class MockHandler(BaseHTTPRequestHandler):
                            f'<SetAutoRenewResult Domain="{dname}" IsSuccess="{ok}" />'
                            f'</CommandResponse></ApiResponse>')
             elif cmd == "namecheap.domains.getList":
-                # Doc trang thai auto-renew: tra cac domain trong
-                # STATE["nc_autorenew"] (loc theo SearchTerm neu co).
+                # Doc trang thai auto-renew / ngay het han: tra cac domain
+                # trong STATE["nc_autorenew"] (loc theo SearchTerm neu
+                # co), co phan trang theo Page/PageSize. Ngay het han
+                # lay tu STATE["nc_expiry"] (mac dinh 12/04/2026).
                 STATE["nc_calls"] += 1
                 search = q.get("SearchTerm", [""])[0].strip().lower()
-                items = ""
+                page = int(q.get("Page", ["1"])[0] or 1)
+                psize = int(q.get("PageSize", ["100"])[0] or 100)
+                all_rows = []
                 for dname, ar in STATE.get("nc_autorenew", {}).items():
                     if search and search not in dname:
                         continue
-                    items += (f'<Domain Name="{dname}" '
-                              f'AutoRenew="{"true" if ar else "false"}" '
-                              f'IsLocked="false" Expires="12/04/2026" />')
+                    exp = STATE.get("nc_expiry", {}).get(dname, "12/04/2026")
+                    all_rows.append(
+                        f'<Domain Name="{dname}" '
+                        f'AutoRenew="{"true" if ar else "false"}" '
+                        f'IsLocked="false" Expires="{exp}" />')
+                rows = all_rows[(page - 1) * psize:page * psize]
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
                        f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
-                       f'<DomainGetListResult>{items}</DomainGetListResult>'
+                       f'<DomainGetListResult>{"".join(rows)}</DomainGetListResult>'
                        f'</CommandResponse></ApiResponse>')
             else:
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="ERROR"{NS}><Errors>'
@@ -418,7 +425,7 @@ def main():
     import app as dash
     import nc_api
     from cf_api import CFClient
-    from nc_api import NCClient, split_domain
+    from nc_api import NCClient, _parse_nc_date, split_domain
     from dns_check import doh_ns
 
     cfg = {"cf_token": "test-token", "cf_account_id": ACCT,
@@ -1469,6 +1476,22 @@ def main():
         raise AssertionError("domain khong co dau cham phai bao loi")
     except Exception as e:
         assert "khong hop le" in str(e), e
+    print("  OK", flush=True)
+
+    print("TEST 47: get_expiry_map — ngay het han tu getList (phan trang) + _parse_nc_date...", flush=True)
+    assert _parse_nc_date("12/04/2026") == "2026-12-04"
+    assert _parse_nc_date("1/5/2027") == "2027-01-05"
+    assert _parse_nc_date("2026-12-04") == "2026-12-04"
+    assert _parse_nc_date("khong phai ngay") is None
+    assert _parse_nc_date("") is None
+    # Dat han rieng cho 2 domain de test doc + phan trang.
+    STATE.setdefault("nc_expiry", {})["ar1.com"] = "12/04/2026"
+    STATE["nc_expiry"]["ar2.com"] = "01/15/2027"
+    exp_map = nc46.get_expiry_map()
+    assert exp_map["ar1.com"] == "2026-12-04", exp_map
+    assert exp_map["ar2.com"] == "2027-01-15", exp_map
+    # Domain khong co trong getList thi khong co trong map.
+    assert "khongco.com" not in exp_map
     print("  OK", flush=True)
 
     srv.shutdown()

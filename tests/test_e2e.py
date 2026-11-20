@@ -303,6 +303,15 @@ def main():
     assert ar_stuck["results"][0]["ok"] is False, ar_stuck
     assert "kiem tra lai" in ar_stuck["results"][0]["detail"], ar_stuck
     print("AUTO-RENEW OK: bat/tat theo danh sach, IsSuccess=false thi bao loi, xac minh lai bat loi that", flush=True)
+
+    # Han domain: doc ngay het han tu Namecheap getList.
+    STATE.setdefault("nc_expiry", {})["ar1.com"] = "12/04/2026"
+    STATE["nc_expiry"]["ar2.com"] = "01/15/2027"
+    exp = call("GET", "/api/expiry")
+    assert exp["ok"], exp
+    assert exp["expiry"]["ar1.com"] == "2026-12-04", exp
+    assert exp["expiry"]["ar2.com"] == "2027-01-15", exp
+    print("EXPIRY OK: ngay het han tu Namecheap getList, dang YYYY-MM-DD", flush=True)
     mock.shutdown()
     print("E2E OK")
 

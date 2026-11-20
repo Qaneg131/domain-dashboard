@@ -1346,6 +1346,21 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"error": str(e)}, 500)
             return
+        if path == "/api/expiry":
+            # Ngay het han cua cac domain o Namecheap (de hien cot Han +
+            # loc domain sap het han). Chi doc getList, khong doi gi
+            # tren Namecheap.
+            cfg = load_config()
+            if not _nc_configured(cfg):
+                self._json({"error": "chua nhap du Namecheap API "
+                                     "(user/key/IP) o muc Cai dat"}, 400)
+                return
+            try:
+                self._json({"ok": True,
+                            "expiry": _nc_client(cfg).get_expiry_map()})
+            except Exception as e:
+                self._json({"error": str(e)}, 500)
+            return
         self._json({"error": "khong co route"}, 404)
 
     def do_POST(self):

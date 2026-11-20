@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 PROD = "https://api.namecheap.com/xml.response"
 
@@ -31,6 +32,18 @@ NC_RETRY_WAITS = (30, 60)
 # doi them lan 2 roi doc lai 1 lan nua. (Test dat
 # nc_api.AUTORENEW_VERIFY_WAITS = (0, 0) de khoi doi.)
 AUTORENEW_VERIFY_WAITS = (2, 3)
+
+
+def _parse_nc_date(s):
+    """Ngay Namecheap tra ve (dang M/D/YYYY, vd 12/4/2026) -> 'YYYY-MM-DD'.
+    None neu khong doc duoc."""
+    s = (s or "").strip()
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 
 def _is_rate_limit_msg(msg):
@@ -156,6 +169,28 @@ class NCClient:
                     return None
                 return ar.strip().lower() == "true"
         return None
+
+    def get_expiry_map(self):
+        """Ngay het han cua tat ca domain trong tai khoan Namecheap.
+        Tra ve dict {domain: 'YYYY-MM-DD'} (chi cac domain co Expires
+        doc duoc). Doc het cac trang getList (PageSize=100)."""
+        out = {}
+        page = 1
+        while True:
+            root = self._call("namecheap.domains.getList", ListType="ALL",
+                              Page=str(page), PageSize="100")
+            rows = root.findall(".//Domain")
+            if not rows:
+                break
+            for el in rows:
+                name = (el.get("Name") or "").strip().lower()
+                iso = _parse_nc_date(el.get("Expires") or "")
+                if name and iso:
+                    out[name] = iso
+            if len(rows) < 100 or page >= 50:
+                break
+            page += 1
+        return out
 
     def set_auto_renew(self, domain, enabled):
         """Bat/tat auto-renew cho 1 domain. Tra ve True neu ap dung duoc
