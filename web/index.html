@@ -45,6 +45,16 @@
   .stat:empty { display: none; }
   .stat.err { background: #fdecea; color: #b3261e; border-color: #f3c1bd; }
   .stat.current { background: #fdf6ec; border-color: #cf9a5f; color: #16130f; font-weight: 700; }
+  /* Dong thong ke Google Sheet: so domain theo trang thai, nhin la thay ngay. */
+  .sheet-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .sheet-stat { flex: 1; min-width: 100px; background: #fffdf9; border: 1px solid #e3ddd2; border-radius: 10px; padding: 10px 12px; text-align: center; }
+  .sheet-stat .num { display: block; font-size: 26px; font-weight: 700; line-height: 1.15; color: #16130f; }
+  .sheet-stat .lbl { font-size: 12px; color: #857c6f; }
+  .sheet-stat.main { background: #fdf6ec; border-color: #cf9a5f; }
+  .sheet-stat.main .num { color: #a06a35; }
+  .sheet-stat.warn .num { color: #b45309; }
+  .sheet-stat.ok .num { color: #15803d; }
+  .sheet-stat.err .num { color: #b3261e; }
   /* Thanh thao tac hang loat: noi bat khi co domain duoc chon, nut nguy hiem tach rieng ben phai. */
   .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #f5f2ed; border: 1px solid #e8e1d5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .bulkbar.has-sel { background: #fdf6ec; border-color: #cf9a5f; }
@@ -194,6 +204,13 @@
       <button onclick="setupSheetRows()">Setup từng hàng</button>
       <button class="secondary" id="sheetStopBtn" onclick="stopSheetSetup()" style="display:none">Dừng</button>
       <span class="muted" id="sheetMsg"></span>
+    </div>
+    <div class="sheet-stats" id="sheetStats" style="display:none">
+      <div class="sheet-stat main"><span class="num" id="sheetCountSetup">0</span><span class="lbl">Sẽ setup</span></div>
+      <div class="sheet-stat warn"><span class="num" id="sheetCountReview">0</span><span class="lbl">Chờ duyệt</span></div>
+      <div class="sheet-stat ok"><span class="num" id="sheetCountDone">0</span><span class="lbl">Đã set up</span></div>
+      <div class="sheet-stat"><span class="num" id="sheetCountSkip">0</span><span class="lbl">Bỏ qua</span></div>
+      <div class="sheet-stat err" id="sheetStatError" style="display:none"><span class="num" id="sheetCountError">0</span><span class="lbl">Lỗi</span></div>
     </div>
     <div id="sheetResults" style="margin-top:10px"></div>
     <h3 style="margin:14px 0 6px">Chờ duyệt — domain xung đột preset</h3>
@@ -613,6 +630,29 @@ function renderSheetResults() {
   if (!SHEET_ROWS.length) { box.innerHTML = ''; return; }
   box.innerHTML = `<table class="tbl"><thead><tr><th>Dòng</th><th>Domain</th><th>Loại web</th><th>Preset</th><th>Cột J</th><th>Hành động</th><th>Ghi chú</th></tr></thead><tbody>${SHEET_ROWS.map(sheetRowHtml).join('')}</tbody></table>`;
 }
+function renderSheetStats() {
+  // Dem domain theo trang thai tu SHEET_ROWS (cap nhat ca khi dang setup tung hang).
+  const box = document.getElementById('sheetStats');
+  if (!SHEET_ROWS.length) { box.style.display = 'none'; return; }
+  const n = { setup: 0, review: 0, done: 0, skip: 0, error: 0 };
+  for (const r of SHEET_ROWS) {
+    if (r.action === 'setup') n.setup++;
+    else if (r.action === 'review') n.review++;
+    else if (r.action === 'done') n.done++;
+    else if (r.action === 'error') n.error++;
+    else if (r.action === 'skip') {
+      if ((r.status_j || '').toLowerCase() === 'đã set up') n.done++;
+      else n.skip++;
+    }
+  }
+  document.getElementById('sheetCountSetup').textContent = n.setup;
+  document.getElementById('sheetCountReview').textContent = n.review;
+  document.getElementById('sheetCountDone').textContent = n.done;
+  document.getElementById('sheetCountSkip').textContent = n.skip;
+  document.getElementById('sheetCountError').textContent = n.error;
+  document.getElementById('sheetStatError').style.display = n.error ? '' : 'none';
+  box.style.display = '';
+}
 async function readSheet() {
   document.getElementById('sheetMsg').textContent = 'Đang đọc sheet…';
   const res = await api('/api/sheet-read', {});
@@ -627,6 +667,7 @@ async function readSheet() {
   document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
   if (res.review) STATE.config.sheet_review = res.review;
   renderSheetResults();
+  renderSheetStats();
   renderSheetReview();
 }
 async function setupSheetRows() {
@@ -646,6 +687,7 @@ async function setupSheetRows() {
     r.action = out.action || r.action;
     r.detail = out.detail || (res.error || '');
     renderSheetResults();
+    renderSheetStats();
   }
   document.getElementById('sheetStopBtn').style.display = 'none';
   if (!SHEET_STOP) document.getElementById('sheetMsg').textContent = `Xong: ${todo.length} hàng.`;
@@ -1571,7 +1613,11 @@ async function applyPreset(d) {
   log(fmtSteps(res));
   await refresh();
 }
-refresh();
+refresh().then(() => {
+  // Mo tool len la thay ngay co bao nhieu domain dang cho set up
+  // (chi doc khi da nhap link CSV; loi thi im lang — bam Doc sheet de xem).
+  if (STATE.config && STATE.config.sheet_csv_url) readSheet();
+});
 </script>
 </body>
 </html>
