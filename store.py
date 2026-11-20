@@ -81,11 +81,12 @@ DEFAULT_CONFIG = {
     # Domain xung dot preset thi chi dua vao hang cho duyet, khong tu setup.
     "sheet_auto": False,
     "sheet_auto_interval": 5,
-    # Thu muc chua tool Chrome domain-setup-tool (co chrome_setup.py) de
-    # chay che do Auto-renew bang trinh duyet. De trong thi tu tim thu
-    # muc 'domain-setup-tool' nam canh thu muc dashboard nay (vd
-    # C:\Users\Quoc An\domain-setup-tool). Chi can neu de o cho khac.
-    "setup_tool_dir": "",
+    # Auto-renew bang Chrome (chrome_autorenew.py nam ngay trong thu muc
+    # Dashboard): ho so Chrome mac dinh dung + thu muc User Data cua
+    # Chrome (de trong thi tu tim theo he dieu hanh). chrome_profile la
+    # ten thu muc ho so da chon o tab Auto-renew (vd 'Default', 'Profile 1').
+    "chrome_profile_dir": "",
+    "chrome_profile": "",
 }
 
 

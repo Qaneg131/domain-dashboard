@@ -1432,28 +1432,32 @@ def main():
     assert "khongco.com" not in exp_map
     print("  OK", flush=True)
 
-    print("TEST 47: _setup_tool_dir — tu tim tool Chrome o nhieu vi tri + nhap tay + bao loi kem cac duong da check...", flush=True)
+    print("TEST 47: chrome_autorenew local + _list_chrome_profiles — doc Local State, fallback quet thu muc...", flush=True)
     import app as dash_app
     from store import BASE_DIR as DASH_BASE
-    cfg47 = {"setup_tool_dir": ""}
-    found = dash_app._setup_tool_dir(cfg47)
-    # Trong repo nay, thu muc domain-setup-tool nam canh dashboard.
-    assert found is not None and (found / "chrome_setup.py").is_file(), found
-    assert found == DASH_BASE.parent / "domain-setup-tool", found
-    # Nhap tay duong dan dung thi dung duong dan do.
-    cfg47 = {"setup_tool_dir": str(found)}
-    assert dash_app._setup_tool_dir(cfg47) == found
-    # Nhap tay duong dan sai thi tu roi ve tu dong tim (khong dung
-    # ngay) — van tim thay thu muc ke ben.
-    assert dash_app._setup_tool_dir({"setup_tool_dir": "/khong/co/thu/muc"}) == found
-    # Danh sach cac duong se check: duong nhap tay dung dau, roi cac
-    # vi tri mac dinh; thong bao loi phai liet ke het cac duong do.
-    cands = dash_app._setup_tool_candidates({"setup_tool_dir": "/khong/co/thu/muc"})
-    assert str(cands[0]) == "/khong/co/thu/muc", cands
-    assert str(DASH_BASE.parent / "domain-setup-tool") in [str(p) for p in cands]
-    msg47 = dash_app._setup_tool_not_found_msg({"setup_tool_dir": "/khong/co/thu/muc"})
-    assert "khong tim thay tool Chrome" in msg47 and "/khong/co/thu/muc" in msg47, msg47
-    assert "Thu muc tool Chrome" in msg47, msg47
+    # Script Chrome nam ngay trong thu muc Dashboard (khong can tim tool ngoai).
+    assert dash_app.AR_SCRIPT == DASH_BASE / "chrome_autorenew.py"
+    assert dash_app.AR_SCRIPT.is_file(), "thieu chrome_autorenew.py"
+    # Liet ke ho so tu thu muc User Data gia: co Local State thi lay ten
+    # hien thi tu info_cache + last_used; khong co thi quet thu muc.
+    import tempfile, json as _json
+    fake_root = Path(tempfile.mkdtemp(prefix="fake-chrome-ud-"))
+    (fake_root / "Default").mkdir()
+    (fake_root / "Profile 1").mkdir()
+    ls = {"profile": {"last_used": "Profile 1",
+                      "info_cache": {"Default": {"name": "Nguoi dung 1"},
+                                     "Profile 1": {"name": "Lam viec"}}}}
+    (fake_root / "Local State").write_text(_json.dumps(ls), encoding="utf-8")
+    profs, last = dash_app._list_chrome_profiles({"chrome_profile_dir": str(fake_root)})
+    assert dict(profs) == {"Default": "Nguoi dung 1", "Profile 1": "Lam viec"}, profs
+    assert last == "Profile 1", last
+    # Khong co Local State thi quet thu muc (ten = ten thu muc).
+    (fake_root / "Local State").unlink()
+    profs2, last2 = dash_app._list_chrome_profiles({"chrome_profile_dir": str(fake_root)})
+    assert dict(profs2) == {"Default": "Default", "Profile 1": "Profile 1"}, profs2
+    # Thu muc khong ton tai thi tra ve rong.
+    profs3, last3 = dash_app._list_chrome_profiles({"chrome_profile_dir": "/khong/co/thu/muc"})
+    assert profs3 == [] and last3 is None, (profs3, last3)
     print("  OK", flush=True)
 
     srv.shutdown()

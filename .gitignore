@@ -2,3 +2,5 @@ config.json
 status.json
 __pycache__/
 *.pyc
+chrome-profile-tool/
+reports/

@@ -297,21 +297,25 @@ def main():
     assert exp["expiry"]["ar2.com"] == "2027-01-15", exp
     print("EXPIRY OK: ngay het han tu Namecheap getList, dang YYYY-MM-DD", flush=True)
 
-    # Auto-renew bang Chrome: dung tool Chrome GIA (fake chrome_setup.py)
+    # Auto-renew bang Chrome: dung script GIA (fake chrome_autorenew.py)
     # de test toan bo duong day subprocess + doc bao cao CSV ma khong
-    # mo Chrome that. Fake ghi bao cao CSV giong that.
+    # mo Chrome that. Fake ghi bao cao CSV giong that. Chi duong dan
+    # script that sang fake bang cach gan lai bien module cua app.
     import tempfile
-    fake_dir = tempfile.mkdtemp(prefix="fake-setup-tool-")
-    os.makedirs(os.path.join(fake_dir, "reports"), exist_ok=True)
+    fake_dir = tempfile.mkdtemp(prefix="fake-ar-")
+    fake_reports = os.path.join(fake_dir, "reports")
+    os.makedirs(fake_reports, exist_ok=True)
     fake_lines = [
         "import argparse, csv, os, sys",
         "p = argparse.ArgumentParser()",
         "p.add_argument('--prepare-nc', action='store_true')",
         "p.add_argument('--autorenew')",
         "p.add_argument('--privacy', default='no')",
+        "p.add_argument('--profile-dir')",
         "p.add_argument('--domains-file')",
         "p.add_argument('--keep-open', action='store_true')",
         "a = p.parse_args()",
+        "print('fake: profile-dir =', a.profile_dir)",
         "if a.prepare_nc:",
         "    print('fake: da mo tab Namecheap')",
         "    sys.exit(0)",
@@ -324,14 +328,17 @@ def main():
         "        w.writerow([d, 'da-bat' if i == 0 else 'ok', '', '', ''])",
         "print('fake: xong', len(doms), 'domain')",
     ]
-    with open(os.path.join(fake_dir, "chrome_setup.py"), "w", encoding="utf-8") as f:
+    fake_script = os.path.join(fake_dir, "chrome_autorenew.py")
+    with open(fake_script, "w", encoding="utf-8") as f:
         f.write("\n".join(fake_lines) + "\n")
-    call("POST", "/api/settings", {"setup_tool_dir": fake_dir})
-    prep = call("POST", "/api/autorenew-browser-prepare", {})
+    dash.AR_SCRIPT = Path(fake_script)
+    dash.AR_REPORTS_DIR = Path(fake_reports)
+    prep = call("POST", "/api/autorenew-browser-prepare", {"profile": "Profile 1"})
     assert prep["ok"], prep
     assert "fake: da mo tab Namecheap" in prep.get("log", ""), prep
+    assert "profile-dir = Profile 1" in prep.get("log", ""), prep
     ar = call("POST", "/api/autorenew-browser",
-              {"domains": ["ar1.com", "ar2.com"], "privacy": "no"})
+              {"domains": ["ar1.com", "ar2.com"], "privacy": "no", "profile": "Profile 1"})
     assert ar["ok"], ar
     assert len(ar["results"]) == 2, ar
     assert ar["results"][0]["domain"] == "ar1.com" and ar["results"][0]["status"] == "da-bat", ar
@@ -344,9 +351,11 @@ def main():
         assert e.code == 400, e
         payload = json.loads(e.read().decode())
         assert "chua nhap domain" in payload.get("error", ""), payload
-    # Tra lai mac dinh (tu tim thu muc ke ben) de khong anh huong test sau.
-    call("POST", "/api/settings", {"setup_tool_dir": ""})
-    print("AUTORENEW-BROWSER OK: prepare + chay fake tool + doc CSV + bao loi khi khong co domain", flush=True)
+    # Endpoint liet ke ho so Chrome: tra ve dang dung (o may test khong
+    # co Chrome that nen danh sach rong, nhung phai co cac khoa).
+    profs = call("GET", "/api/chrome-profiles")
+    assert profs["ok"] and "profiles" in profs and "last_used" in profs, profs
+    print("AUTORENEW-BROWSER OK: prepare + chay fake script + doc CSV + chon profile + bao loi khi khong co domain + liet ke ho so", flush=True)
     mock.shutdown()
     print("E2E OK")
 

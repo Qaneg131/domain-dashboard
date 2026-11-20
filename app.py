@@ -76,70 +76,76 @@ def _nc_configured(cfg):
 # ------------------------------------------------------------------ auto-renew
 # API setAutoRenew cua Namecheap bao IsSuccess=true nhung toggle tren
 # web khong doi (da xac minh 2026-11-20) nen auto-renew phai bam toggle
-# that tren trinh duyet. Dashboard tu no khong dieu khien duoc Chrome
-# nen goi sang tool Chrome domain-setup-tool (chrome_setup.py) dang
-# subprocess — dung lai logic da test o ben do (doc trang thai toggle
-# truoc, da BAT thi bo qua, chi bam khi TAT, xu ly hop thoai Privacy).
-def _setup_tool_candidates(cfg):
-    """Cac thu muc co the chua chrome_setup.py, theo thu tu uu tien:
-    gia tri user nhap (setup_tool_dir) truoc, roi cac vi tri thuong gap
-    (canh dashboard, trong dashboard, thu muc home, Desktop, thu muc
-    hien tai)."""
-    cands = []
-    cand = str(cfg.get("setup_tool_dir") or "").strip()
+# that tren trinh duyet. Script Chrome nam NGAY TRONG thu muc Dashboard
+# (chrome_autorenew.py — tach tu tool Chrome cu domain-setup-tool, user
+# da xoa thu muc cu roi) nen Dashboard goi no dang subprocess, khong
+# can tim tool o dau nua. Script doc trang thai toggle truoc, da BAT
+# thi bo qua, chi bam khi TAT, xu ly hop thoai Privacy.
+AR_SCRIPT = Path(os.environ.get("CHROME_AUTORENEW_SCRIPT") or (BASE_DIR / "chrome_autorenew.py"))
+AR_REPORTS_DIR = BASE_DIR / "reports"
+
+
+def _chrome_profile_dir(cfg):
+    """Thu muc User Data cua Chrome (chua cac ho so Default/Profile 1...).
+    Mac dinh tu tim theo he dieu hanh; user nhap tay neu Chrome de o
+    cho khac (o 'Thu muc User Data Chrome' trong muc Cai dat)."""
+    cand = str(cfg.get("chrome_profile_dir") or "").strip()
     if cand:
-        cands.append(Path(cand).expanduser())
-    base = BASE_DIR
-    cands += [base.parent / "domain-setup-tool",
-              base / "domain-setup-tool",
-              Path.home() / "domain-setup-tool",
-              Path.home() / "Desktop" / "domain-setup-tool",
-              Path.cwd() / "domain-setup-tool"]
-    # Loai trung (giu thu tu).
-    seen, out = set(), []
-    for p in cands:
-        k = str(p)
-        if k not in seen:
-            seen.add(k)
-            out.append(p)
-    return out
+        return Path(cand).expanduser()
+    home = Path.home()
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA", "")
+        return Path(local) / "Google" / "Chrome" / "User Data" if local else home
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Google" / "Chrome"
+    return home / ".config" / "google-chrome"
 
 
-def _setup_tool_dir(cfg):
-    """Thu muc chua chrome_setup.py: gia tri user nhap (setup_tool_dir)
-    uu tien; de trong thi tim o cac vi tri thuong gap. Tra ve Path,
-    hoac None neu khong tim thay o dau."""
-    for p in _setup_tool_candidates(cfg):
-        if (p / "chrome_setup.py").is_file():
-            return p
-    return None
+def _list_chrome_profiles(cfg):
+    """Liet ke cac ho so Chrome trong thu muc User Data.
+    Tra ve (danh_sach, last_used) voi danh_sach = [(thu_muc, ten_hien_thi)].
+    Ten hien thi lay tu Local State (profile.info_cache) — chinh la ten
+    hien trong menu doi ho so cua Chrome."""
+    root = _chrome_profile_dir(cfg)
+    profiles, last_used = [], None
+    try:
+        ls = root / "Local State"
+        if ls.exists():
+            data = json.loads(ls.read_text(encoding="utf-8"))
+            prof = data.get("profile", {}) or {}
+            last_used = prof.get("last_used")
+            cache = prof.get("info_cache", {}) or {}
+            for dirname, info in cache.items():
+                if (root / dirname).is_dir():
+                    profiles.append((dirname, (info or {}).get("name") or dirname))
+    except Exception:
+        pass
+    if not profiles:
+        for d in sorted(root.iterdir()) if root.exists() else []:
+            if d.is_dir() and (d.name == "Default" or d.name.startswith("Profile ")):
+                profiles.append((d.name, d.name))
+    if last_used not in [p[0] for p in profiles]:
+        last_used = profiles[0][0] if profiles else None
+    return profiles, last_used
 
 
-def _setup_tool_not_found_msg(cfg):
-    checked = "; ".join(str(p) for p in _setup_tool_candidates(cfg))
-    return ("khong tim thay tool Chrome domain-setup-tool "
-            "(can chrome_setup.py) — da tim o: " + checked +
-            ". Nhap dung duong dan thu muc domain-setup-tool vao o "
-            "\"Thu muc tool Chrome\" trong muc Cai dat roi Luu.")
-
-
-def _run_chrome_setup(setup_dir, args):
-    """Chay chrome_setup.py nhu subprocess, doi xong, tra ve
-    (returncode, log stdout+stderr)."""
-    cmd = [sys.executable, str(setup_dir / "chrome_setup.py")] + args
+def _run_chrome_autorenew(args):
+    """Chay chrome_autorenew.py (trong thu muc Dashboard) nhu subprocess,
+    doi xong, tra ve (returncode, log stdout+stderr)."""
+    cmd = [sys.executable, str(AR_SCRIPT)] + args
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, encoding="utf-8", errors="replace",
-                          env=env, cwd=str(setup_dir))
+                          env=env, cwd=str(BASE_DIR))
     return proc.returncode, proc.stdout or ""
 
 
-def _read_newest_ar_report(setup_dir, before):
-    """Doc bao cao CSV moi nhat ma chrome_setup.py vua ghi (reports/
+def _read_newest_ar_report(before):
+    """Doc bao cao CSV moi nhat ma chrome_autorenew.py vua ghi (reports/
     chrome_setup_*.csv) — so voi danh sach file truoc khi chay de chi
     lay file moi. Tra ve list dict {domain, status, error}."""
-    after = set(glob.glob(str(setup_dir / "reports" / "chrome_setup_*.csv")))
+    after = set(glob.glob(str(AR_REPORTS_DIR / "chrome_setup_*.csv")))
     new = sorted(after - before)
     if not new:
         return []
@@ -1430,6 +1436,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"error": str(e)}, 500)
             return
+        if path == "/api/chrome-profiles":
+            # Danh sach ho so Chrome tren may nay (de chon o tab
+            # Auto-renew) — doc tu thu muc User Data cua Chrome.
+            cfg = load_config()
+            profiles, last_used = _list_chrome_profiles(cfg)
+            self._json({"ok": True,
+                        "profiles": [{"dir": d, "name": n} for d, n in profiles],
+                        "last_used": last_used,
+                        "profile_dir": str(_chrome_profile_dir(cfg))})
+            return
         if path == "/api/expiry":
             # Ngay het han cua cac domain o Namecheap (de hien cot Han +
             # loc domain sap het han). Chi doc getList, khong doi gi
@@ -1590,22 +1606,27 @@ class Handler(BaseHTTPRequestHandler):
                             "rate_limited": rate_limited})
             elif path == "/api/autorenew-browser-prepare":
                 # Nut 1 (tab Auto-renew): mo tab Namecheap Domain List de
-                # dang nhap truoc — chay chrome_setup.py --prepare-nc.
-                setup_dir = _setup_tool_dir(cfg)
-                if setup_dir is None:
+                # dang nhap truoc — chay chrome_autorenew.py --prepare-nc
+                # (script nam ngay trong thu muc Dashboard).
+                if not AR_SCRIPT.is_file():
                     self._json({"ok": False, "error":
-                                _setup_tool_not_found_msg(cfg)}, 400)
+                                "khong tim thay chrome_autorenew.py trong "
+                                "thu muc Dashboard"}, 400)
                     return
-                rc, logtxt = _run_chrome_setup(setup_dir, ["--prepare-nc"])
+                args = ["--prepare-nc"]
+                prof = str(body.get("profile") or "").strip()
+                if prof:
+                    args += ["--profile-dir", prof]
+                rc, logtxt = _run_chrome_autorenew(args)
                 self._json({"ok": rc == 0, "log": logtxt})
             elif path == "/api/autorenew-browser":
                 # Nut 2 (tab Auto-renew): bam toggle Auto-Renew that tren
                 # Chrome cho tung domain trong danh sach. Domain nao toggle
                 # da BAT roi thi ben Chrome tu bo qua (khong bam).
-                setup_dir = _setup_tool_dir(cfg)
-                if setup_dir is None:
+                if not AR_SCRIPT.is_file():
                     self._json({"ok": False, "error":
-                                _setup_tool_not_found_msg(cfg)}, 400)
+                                "khong tim thay chrome_autorenew.py trong "
+                                "thu muc Dashboard"}, 400)
                     return
                 raw = body.get("domains") or []
                 if isinstance(raw, str):
@@ -1620,14 +1641,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "chua nhap domain nao"}, 400)
                     return
                 privacy = "yes" if str(body.get("privacy") or "").strip().lower() == "yes" else "no"
-                before = set(glob.glob(str(setup_dir / "reports" / "chrome_setup_*.csv")))
+                before = set(glob.glob(str(AR_REPORTS_DIR / "chrome_setup_*.csv")))
                 tmpdir = Path(tempfile.mkdtemp(prefix="dashboard-ar-"))
                 dom_file = tmpdir / "domains.txt"
                 dom_file.write_text("\n".join(domains) + "\n", encoding="utf-8")
-                rc, logtxt = _run_chrome_setup(setup_dir, [
-                    "--domains-file", str(dom_file),
-                    "--autorenew", "on", "--privacy", privacy, "--keep-open"])
-                results = _read_newest_ar_report(setup_dir, before)
+                args = ["--domains-file", str(dom_file),
+                        "--autorenew", "on", "--privacy", privacy, "--keep-open"]
+                prof = str(body.get("profile") or "").strip()
+                if prof:
+                    args += ["--profile-dir", prof]
+                rc, logtxt = _run_chrome_autorenew(args)
+                results = _read_newest_ar_report(before)
                 self._json({"ok": rc == 0 and bool(results),
                             "results": results, "log": logtxt,
                             "error": "" if results else

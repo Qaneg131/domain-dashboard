@@ -131,8 +131,8 @@
       <div class="row"><label>Namecheap Client IP</label><input type="text" id="nc_client_ip" placeholder="IP đã whitelist">
         <button class="secondary small" onclick="getMyIp()">Lấy IP hiện tại</button>
         <span class="muted" id="myIp"></span></div>
-      <div class="row"><label>Thư mục tool Chrome</label><input type="text" id="setup_tool_dir" placeholder="để trống = tự tìm thư mục domain-setup-tool cạnh dashboard">
-        <span class="muted">Đường dẫn tới tool Chrome (có chrome_setup.py) để chạy Auto-renew bằng trình duyệt. Để trống thì tự tìm.</span></div>
+      <div class="row"><label>Thư mục User Data Chrome</label><input type="text" id="chrome_profile_dir" placeholder="để trống = tự tìm (thường là C:\Users\...\AppData\Local\Google\Chrome\User Data)">
+        <span class="muted">Chỉ cần khi Chrome để User Data ở chỗ khác — để Dashboard liệt kê các hồ sơ Chrome cho tab Auto-renew.</span></div>
       <div class="row"><button onclick="saveSettings()">Lưu cài đặt</button><span class="muted" id="settingsMsg"></span></div>
     </details>
   </div>
@@ -307,6 +307,11 @@
     <h2>Auto-renew (bằng Chrome) — bật tự động gia hạn trên Namecheap</h2>
     <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: dán list domain, chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain trong ô này.</p>
     <textarea id="arDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="example.com&#10;example.net"></textarea>
+    <div class="row" style="margin-top:8px">
+      <label>Hồ sơ Chrome</label>
+      <select id="arProfile"><option value="">Đang tải hồ sơ Chrome…</option></select>
+      <span class="muted">Chọn hồ sơ đã đăng nhập Namecheap (thường là hồ sơ chính). Tool mở Chrome từ bản copy của hồ sơ này nên vẫn đăng nhập sẵn.</span>
+    </div>
     <div class="row" style="margin-top:8px">
       <label>Hộp thoại Domain Privacy</label>
       <select id="arPrivacy">
@@ -524,7 +529,8 @@ async function refresh() {
   document.getElementById('nc_user').value = cfg.nc_user || '';
   document.getElementById('nc_api_key').value = cfg.nc_api_key || '';
   document.getElementById('nc_client_ip').value = cfg.nc_client_ip || '';
-  document.getElementById('setup_tool_dir').value = cfg.setup_tool_dir || '';
+  document.getElementById('chrome_profile_dir').value = cfg.chrome_profile_dir || '';
+  loadArProfiles();
   if (!cfg.cf_token || !cfg.nc_api_key) document.getElementById('settingsBox').open = true;
   renderPresets();
   renderEmailPreset();
@@ -1009,15 +1015,34 @@ async function addBatchToManaged() {
 
 // ---------------------------------------------------------------- auto-renew
 // Bat auto-renew bang Chrome (API khong lam duoc): Dashboard goi sang
-// tool Chrome domain-setup-tool (chrome_setup.py) dang subprocess.
+// chrome_autorenew.py nam ngay trong thu muc Dashboard.
 function arDomainList() {
   return [...new Set(document.getElementById('arDomains').value.split(/[\s,;]+/)
     .map(s => s.trim().toLowerCase()).filter(s => s && s.includes('.')))];
 }
+async function loadArProfiles() {
+  const sel = document.getElementById('arProfile');
+  const saved = (STATE.config || {}).chrome_profile || '';
+  try {
+    const res = await api('/api/chrome-profiles');
+    const list = res.profiles || [];
+    if (!list.length) {
+      sel.innerHTML = '<option value="">Không thấy hồ sơ Chrome nào</option>';
+      return;
+    }
+    sel.innerHTML = list.map(p => `<option value="${esc(p.dir)}">${esc(p.name)} (${esc(p.dir)})</option>`).join('');
+    const want = saved || res.last_used || list[0].dir;
+    if ([...sel.options].some(o => o.value === want)) sel.value = want;
+  } catch (e) {
+    sel.innerHTML = '<option value="">Không tải được hồ sơ Chrome</option>';
+  }
+}
 async function openArNamecheap() {
   const msg = document.getElementById('arMsg');
+  const profile = document.getElementById('arProfile').value;
+  await api('/api/settings', { chrome_profile: profile });
   msg.textContent = 'Đang mở tab Namecheap…';
-  const res = await api('/api/autorenew-browser-prepare', {});
+  const res = await api('/api/autorenew-browser-prepare', { profile });
   if (res.log) log(res.log);
   if (res.ok) {
     msg.textContent = 'Đã mở tab Namecheap — đăng nhập xong rồi bấm nút 2.';
@@ -1029,11 +1054,13 @@ async function runArBrowser() {
   const domains = arDomainList();
   if (!domains.length) { alert('Chưa nhập domain nào vào ô auto-renew.'); return; }
   const privacy = document.getElementById('arPrivacy').value;
+  const profile = document.getElementById('arProfile').value;
+  await api('/api/settings', { chrome_profile: profile });
   const msg = document.getElementById('arMsg');
   if (!confirm(`Bật auto-renew cho ${domains.length} domain:\n${domains.join('\n')}\n\nTool sẽ mở Chrome, tìm từng domain trong Domain List rồi bấm toggle thật. Domain nào đã BẬT rồi thì bỏ qua.`)) return;
   msg.textContent = `Đang bật auto-renew cho ${domains.length} domain… (mỗi domain có thể mất ~20 giây, xem cửa sổ Chrome)`;
   log(`Đang bật auto-renew (bằng Chrome) cho ${domains.length} domain…`);
-  const res = await api('/api/autorenew-browser', { domains, privacy });
+  const res = await api('/api/autorenew-browser', { domains, privacy, profile });
   if (res.log) log(res.log);
   if (res.error && !(res.results || []).length) {
     msg.textContent = res.error;
@@ -1063,7 +1090,7 @@ async function saveSettings() {
     nc_user: document.getElementById('nc_user').value.trim(),
     nc_api_key: document.getElementById('nc_api_key').value.trim(),
     nc_client_ip: document.getElementById('nc_client_ip').value.trim(),
-    setup_tool_dir: document.getElementById('setup_tool_dir').value.trim(),
+    chrome_profile_dir: document.getElementById('chrome_profile_dir').value.trim(),
   };
   const res = await api('/api/settings', body);
   document.getElementById('settingsMsg').textContent = res.ok ? 'Đã lưu.' : (res.error || 'Lỗi.');
