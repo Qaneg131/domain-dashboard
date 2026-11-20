@@ -1126,7 +1126,7 @@ def main():
     dash.sheet_write_status = fake_write
     one41 = dash._sheet_setup_one("stylenora.com", 1407, "Web Chị Hân", cfg41, st41)
     assert one41["action"] == "done", one41
-    assert written == [(1407, "đã set up")], written
+    assert written == [(1407, "Đã setup")], written  # ghi dung dropdown cua user
     z41b, _c = cf.get_or_create_zone("stylenora.com")
     assert any(x["type"] == "A" and x["content"] == "134.209.163.195"
                for x in cf.list_records(z41b["id"])), cf.list_records(z41b["id"])
@@ -1195,7 +1195,7 @@ def main():
     ok42, det42 = dash.sheet_write_status(1402, "đã set up", cfg42)
     assert ok42, det42
     assert len(put_seen) == 1 and "J1402" in put_seen[0][0], put_seen
-    assert put_seen[0][1]["values"] == [["đã set up"]], put_seen
+    assert put_seen[0][1]["values"] == [["đã set up"]], put_seen  # gia tri truyen vao truc tiep
     # API loi -> fallback CSV (van doc duoc, source csv).
     cfg42["sheet_start_row"] = 1402  # fake_csv co dong 1402+
     dash._sheet_fetch_api = lambda cfg: (_ for _ in ()).throw(RuntimeError("api down"))
@@ -1207,6 +1207,74 @@ def main():
     rows42c, err42c, src42c = dash.sheet_read_rows(cfg42)
     assert not err42c and src42c == "csv", (err42c, src42c)
     sh_srv.shutdown()
+    print("  OK", flush=True)
+
+    print("TEST 43: Google Sheet — nhan ca 'Can set up'/'Can setup', ghi 'Da setup', tu dong setup...", flush=True)
+    cfg43 = dict(cfg41)
+    cfg43["sheet_start_row"] = 2
+    cfg43["sheet_auto"] = True
+    cfg43["sheet_auto_interval"] = 5
+    def fake_csv43(url):
+        rows = [["", "Tên Domain", "Hạn Domain", "DaysLeft", "LLC", "Address",
+                 "Số lần làm lại web", "Loại web", "Tên Dev", "Đã hoàn thành"]]
+        def mk(domain, loai, j):
+            r = [""] * 12
+            r[1] = domain; r[7] = loai; r[9] = j
+            return r
+        # Du cac cach viet: 'Can setup' (khong khoang trang), 'Can set up'
+        # (co khoang trang), 'Da setup', 'da set up' — deu phai nhan.
+        rows.append(mk("auto1.com", "Web Thuần Hân", "Cần setup"))     # row 2
+        rows.append(mk("auto2.com", "Web Thuần Long", "Cần set up"))    # row 3
+        rows.append(mk("auto3.com", "Web Thuần Hân", "Đã setup"))       # row 4 (da xong)
+        rows.append(mk("auto4.com", "Web Thuần Hân", "đã set up"))      # row 5 (da xong)
+        rows.append(mk("auto5.com", "Web Thuần Long", "Cần setup"))     # row 6 (xung dot)
+        return rows
+    dash._sheet_fetch_csv = fake_csv43
+    # auto5.com dang dung 'Web Chi Han' (sheet muon 'Web Anh Long' -> cho duyet, khong tu setup).
+    z43, _c = cf.get_or_create_zone("auto5.com")
+    cf.create_record(z43["id"], "A", "auto5.com", "134.209.163.195", True)
+    cf.create_record(z43["id"], "A", "www.auto5.com", "134.209.163.195", True)
+    st43 = {}
+    dash._save_check_result(st43, "auto5.com",
+                            dash.check_domain("auto5.com", cfg43, skip_nc=True))
+    assert st43["auto5.com"].get("records_preset") == "Web Chị Hân", st43
+    STATE["nc_ns"]["auto1.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    STATE["nc_ns"]["auto2.com"] = ["dns1.registrar-servers.com", "dns2.registrar-servers.com"]
+    # Doc: ca 5 dong deu duoc nhan (khong phan biet cach viet 'setup'/'set up').
+    rows43, err43, src43 = dash.sheet_read_rows(cfg43)
+    assert not err43, err43
+    assert {r["domain"] for r in rows43} == {"auto1.com", "auto2.com", "auto3.com",
+                                             "auto4.com", "auto5.com"}, rows43
+    cls43 = dash._sheet_classify(rows43, cfg43, st43)
+    act43 = {r["domain"]: r["action"] for r in cls43}
+    assert act43 == {"auto1.com": "setup", "auto2.com": "setup",
+                     "auto3.com": "skip", "auto4.com": "skip",
+                     "auto5.com": "review"}, act43
+    # Ghi ve cot J dung 'Da setup' (dung dropdown cua user).
+    written43 = []
+    def fake_write43(row, value, cfg):
+        written43.append((row, value))
+        return True, "ok"
+    dash.sheet_write_status = fake_write43
+    # Tu dong setup 1 luot: auto1 + auto2 xong, auto5 vao hang cho duyet (khong tu setup).
+    ran43 = dash._sheet_auto_once(cfg43, st43)
+    assert ran43 is True, ran43
+    assert (2, "Đã setup") in written43 and (3, "Đã setup") in written43, written43
+    assert 6 not in [w[0] for w in written43], written43  # auto5 khong duoc setup
+    assert any(q["domain"] == "auto5.com" for q in cfg43["sheet_review"]), cfg43["sheet_review"]
+    last43 = dash.SHEET_AUTO_LAST
+    assert last43["ok"] and last43["done"] == 2 and last43["queued"] == 1, last43
+    # Tat auto thi khong chay.
+    cfg43["sheet_auto"] = False
+    assert dash._sheet_auto_once(cfg43, st43) is False
+    # Dang co lock (setup thu cong) thi bo qua luot tu dong.
+    cfg43["sheet_auto"] = True
+    dash.SHEET_LOCK.acquire()
+    try:
+        assert dash._sheet_auto_once(cfg43, st43) is False
+    finally:
+        dash.SHEET_LOCK.release()
+    dash.sheet_write_status = _real_write  # khoi phuc
     print("  OK", flush=True)
 
     srv.shutdown()

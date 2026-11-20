@@ -179,7 +179,7 @@
 
   <div class="card">
     <h2>Google Sheet — setup theo sheet</h2>
-    <p class="hint">Đọc sheet từ link CSV publish (chỉ 3 cột: <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b> (sẽ setup) và <b>"đã set up"</b> (bỏ qua). Setup xong thì ghi "đã set up" vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt.</p>
+    <p class="hint">Đọc sheet từ link CSV publish (chỉ 3 cột: <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã setup"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt.</p>
     <div class="row">
       <label style="flex:1">Link CSV publish <input type="text" id="sheetCsvUrl" style="width:100%" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?...&output=csv"></label>
     </div>
@@ -204,6 +204,11 @@
       <button onclick="setupSheetRows()">Setup từng hàng</button>
       <button class="secondary" id="sheetStopBtn" onclick="stopSheetSetup()" style="display:none">Dừng</button>
       <span class="muted" id="sheetMsg"></span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label><input type="checkbox" id="sheetAuto" onchange="saveSheetAuto()"> <b>Tự động setup</b> — chỉ cần thêm domain vào sheet rồi đổi cột J thành "Cần setup" là tự chạy, không cần bấm nút (dashboard phải đang mở).</label>
+      <label>mỗi <input type="number" id="sheetAutoInterval" style="width:60px" min="1" max="60" value="5" onchange="saveSheetAuto()"> phút</label>
+      <span class="muted" id="sheetAutoMsg"></span>
     </div>
     <div class="sheet-stats" id="sheetStats" style="display:none">
       <div class="sheet-stat main"><span class="num" id="sheetCountSetup">0</span><span class="lbl">Sẽ setup</span></div>
@@ -571,8 +576,25 @@ function renderSheetSettings() {
   document.getElementById('sheetStartRow').value = cfg.sheet_start_row || 1402;
   document.getElementById('sheetId').value = cfg.sheet_id || '';
   document.getElementById('sheetSaKey').value = cfg.sheet_sa_key || '';
+  document.getElementById('sheetAuto').checked = !!cfg.sheet_auto;
+  document.getElementById('sheetAutoInterval').value = cfg.sheet_auto_interval || 5;
+  const last = STATE.sheet_auto_last || {};
+  document.getElementById('sheetAutoMsg').textContent = last.at
+    ? (last.ok ? `Lần chạy cuối ${last.at}: đã setup ${last.done} domain${last.queued ? `, ${last.queued} chờ duyệt` : ''}.`
+               : `Lần chạy cuối ${last.at}: lỗi — ${last.error || ''}`)
+    : '';
   renderSheetRules();
   renderSheetReview();
+}
+async function saveSheetAuto() {
+  const res = await api('/api/sheet-settings', {
+    auto: document.getElementById('sheetAuto').checked,
+    interval: parseInt(document.getElementById('sheetAutoInterval').value, 10) || 5,
+  });
+  if (res.ok) await refresh();  // refresh() ve lai sheetAutoMsg -> dat message sau no
+  document.getElementById('sheetAutoMsg').textContent = res.ok
+    ? (document.getElementById('sheetAuto').checked ? 'Đã bật tự động setup.' : 'Đã tắt tự động setup.')
+    : ('Lỗi: ' + (res.error || ''));
 }
 async function saveSheetSettings() {
   const res = await api('/api/sheet-settings', {
@@ -641,7 +663,8 @@ function renderSheetStats() {
     else if (r.action === 'done') n.done++;
     else if (r.action === 'error') n.error++;
     else if (r.action === 'skip') {
-      if ((r.status_j || '').toLowerCase() === 'đã set up') n.done++;
+      // Chuan hoa nhu backend: 'Da setup'/'da set up' deu tinh la da xong.
+      if ((r.status_j || '').toLowerCase().replace(/[\s\-_]/g, '') === 'đãsetup') n.done++;
       else n.skip++;
     }
   }
@@ -653,18 +676,18 @@ function renderSheetStats() {
   document.getElementById('sheetStatError').style.display = n.error ? '' : 'none';
   box.style.display = '';
 }
-async function readSheet() {
-  document.getElementById('sheetMsg').textContent = 'Đang đọc sheet…';
+async function readSheet(quiet) {
+  if (!quiet) document.getElementById('sheetMsg').textContent = 'Đang đọc sheet…';
   const res = await api('/api/sheet-read', {});
   if (!res.ok) {
-    document.getElementById('sheetMsg').textContent = 'Lỗi: ' + (res.error || '');
+    if (!quiet) document.getElementById('sheetMsg').textContent = 'Lỗi: ' + (res.error || '');
     return;
   }
   SHEET_ROWS = res.rows || [];
   const nSetup = SHEET_ROWS.filter(r => r.action === 'setup').length;
   const nReview = SHEET_ROWS.filter(r => r.action === 'review').length;
   const src = res.source === 'api' ? 'Sheets API (live)' : 'link CSV publish (có thể chậm vài phút so với sheet)';
-  document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
+  if (!quiet) document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
   if (res.review) STATE.config.sheet_review = res.review;
   renderSheetResults();
   renderSheetStats();
@@ -1617,6 +1640,10 @@ refresh().then(() => {
   // Mo tool len la thay ngay co bao nhieu domain dang cho set up
   // (chi doc khi da nhap link CSV; loi thi im lang — bam Doc sheet de xem).
   if (STATE.config && STATE.config.sheet_csv_url) readSheet();
+  // Auto setup dang bat thi doc lang moi 60s de so lieu cap nhat theo luot tu chay.
+  setInterval(() => {
+    if (STATE.config && STATE.config.sheet_auto && STATE.config.sheet_csv_url) readSheet(true);
+  }, 60000);
 });
 </script>
 </body>

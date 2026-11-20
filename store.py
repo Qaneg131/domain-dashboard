@@ -76,6 +76,12 @@ DEFAULT_CONFIG = {
     # preset domain dang dung) + domain da tu choi (khong dua lai nua).
     "sheet_review": [],
     "sheet_ignored": [],
+    # Tu dong setup: bat thi server tu doc sheet moi N phut (mac dinh 5)
+    # va setup cac dong sach 'Can setup' — chi can them domain vao sheet
+    # roi doi cot J thanh 'Can setup' la tu chay, khong can bam nut.
+    # Domain xung dot preset thi chi dua vao hang cho duyet, khong tu setup.
+    "sheet_auto": False,
+    "sheet_auto_interval": 5,
 }
 
 

@@ -103,6 +103,17 @@ def main():
     r3 = call("POST", "/api/sheet-rule-delete", {"index": 2})
     assert r3["ok"] and len(r3["rules"]) == 2, r3
     print("SHEET-RULES OK: them/doi ten/trung ten bi tu choi/xoa", flush=True)
+
+    # Sheet auto-setup: bat/tat + khoang thoi gian, /api/state tra sheet_auto_last.
+    a1 = call("POST", "/api/sheet-settings", {"auto": True, "interval": 3})
+    assert a1["ok"], a1
+    st1 = call("GET", "/api/state")
+    assert st1["config"]["sheet_auto"] is True, st1["config"]
+    assert st1["config"]["sheet_auto_interval"] == 3, st1["config"]
+    assert "sheet_auto_last" in st1 and st1["sheet_auto_last"]["at"] == "", st1
+    a2 = call("POST", "/api/sheet-settings", {"auto": False})
+    assert a2["ok"] and call("GET", "/api/state")["config"]["sheet_auto"] is False
+    print("SHEET-AUTO OK: bat/tat + interval + state tra sheet_auto_last", flush=True)
     res2 = call("POST", "/api/apply-preset", {"domain": "welvella.com", "preset": "shop"})
     print("APPLY shop:", res2["ok"], res2["steps"][0]["detail"], flush=True)
     assert res2["ok"], res2

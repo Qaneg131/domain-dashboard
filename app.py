@@ -20,6 +20,7 @@ Chi chay local (127.0.0.1), token/key chi luu o config.json tren may nay.
 """
 import json
 import os
+import threading
 import time
 import traceback
 import urllib.parse
@@ -698,7 +699,17 @@ def _sheet_preset_for(loai, cfg):
     return None
 # Chi xu ly 2 gia tri nay o cot J — cac gia tri khac ("Can check web",
 # "Da hoan thanh", trong...) thi bo qua.
-SHEET_WANT = ("cần set up", "đã set up")
+def _sheet_norm_status(s):
+    """Chuan hoa trang thai cot J: bo khoang trang/gach noi/gach duoi, lower.
+    'Cần set up'/'Cần setup'/'Cần set-up' -> 'cầnsetup';
+    'Đã set up'/'Đã setup'/'Đã set-up' -> 'đãsetup'.
+    (Sheet cua user dung ca 2 cach viet, dropdown hien 'Đã setup'.)"""
+    return (s or "").strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+
+
+SHEET_WANT = ("cầnsetup", "đãsetup")
+SHEET_DONE = "đãsetup"  # gia tri ghi ve cot J khi setup xong (dung dropdown cua user)
+SHEET_DONE_DISPLAY = "Đã setup"
 
 
 # Base URL Sheets API — doi duoc qua env SHEETS_API_BASE (de test voi mock).
@@ -823,7 +834,7 @@ def sheet_read_rows(cfg):
         if not domain or "." not in domain:
             continue
         status_j = _sheet_cell(r, 9).strip()
-        if status_j.lower() not in SHEET_WANT:
+        if _sheet_norm_status(status_j) not in SHEET_WANT:
             continue
         loai = _sheet_cell(r, 7).strip()
         by_domain[domain] = {"row": row_no, "domain": domain, "loai": loai,
@@ -912,7 +923,7 @@ def _sheet_classify(rows, cfg, st):
         d = r["domain"]
         r = dict(r)
         r["preset"] = _sheet_preset_for(r.get("loai"), cfg)
-        if r["status_j"].lower() == "đã set up":
+        if _sheet_norm_status(r["status_j"]) == SHEET_DONE:
             r["action"], r["detail"] = "skip", "đã set up rồi"
         elif d in ignored:
             r["action"], r["detail"] = "skip", "đã từ chối trước đó"
@@ -941,7 +952,7 @@ def _sheet_setup_one(domain, row, preset, cfg, st):
     res = setup_domain(domain, preset, cfg)
     _save_check_result(st, domain, check_domain(domain, cfg, skip_nc=True))
     if res.get("ok"):
-        ok_w, det_w = sheet_write_status(row, "đã set up", cfg)
+        ok_w, det_w = sheet_write_status(row, SHEET_DONE_DISPLAY, cfg)
         return {"domain": domain, "row": row, "preset": preset,
                 "action": "done",
                 "detail": ("setup xong" if ok_w else
@@ -951,6 +962,69 @@ def _sheet_setup_one(domain, row, preset, cfg, st):
     return {"domain": domain, "row": row, "preset": preset,
             "action": "error",
             "detail": "setup lỗi — " + ("; ".join(bad) if bad else "xem log")}
+
+
+# Khoa chong 2 luot setup sheet chay chong len nhau (tu dong vs thu cong).
+SHEET_LOCK = threading.Lock()
+# Ket qua lan tu dong setup gan nhat (de hien o UI) — chi luu trong RAM.
+SHEET_AUTO_LAST = {"at": "", "ok": None, "done": 0, "queued": 0, "error": ""}
+
+
+def _sheet_auto_once(cfg, st):
+    """1 luot tu dong setup: neu sheet_auto bat thi chay sheet_setup_clean
+    (chi dong sach; domain xung dot thi vao hang cho duyet, khong tu setup).
+    Tra ve True neu da chay (ke ca khi loi), False neu tat hoac dang co luot
+    setup thu cong chay (bo qua luot nay, khong cho)."""
+    import time as _time
+    if not cfg.get("sheet_auto"):
+        return False
+    if not SHEET_LOCK.acquire(blocking=False):
+        return False  # dang co setup thu cong -> bo qua
+    try:
+        res = sheet_setup_clean(cfg, st)
+        save_status(st)
+        SHEET_AUTO_LAST.update({
+            "at": _time.strftime("%H:%M:%S %d/%m/%Y"),
+            "ok": bool(res.get("ok")),
+            "done": len([r for r in res.get("results", [])
+                         if r.get("action") == "done"]),
+            "queued": len(res.get("queued", [])),
+            "error": res.get("error", "") or "",
+        })
+        return True
+    except Exception as e:
+        SHEET_AUTO_LAST.update({"at": _time.strftime("%H:%M:%S %d/%m/%Y"),
+                                "ok": False, "done": 0, "queued": 0,
+                                "error": str(e)})
+        return True
+    finally:
+        SHEET_LOCK.release()
+
+
+def _sheet_auto_loop():
+    """Thread nen: cu moi sheet_auto_interval phut (mac dinh 5) thi chay
+    1 luot _sheet_auto_once."""
+    import time as _time
+    elapsed = 0.0
+    while True:
+        _time.sleep(10)
+        elapsed += 10
+        try:
+            cfg = load_config()
+        except Exception:
+            continue
+        if not cfg.get("sheet_auto"):
+            elapsed = 0.0
+            continue
+        try:
+            interval = float(cfg.get("sheet_auto_interval") or 5)
+        except (TypeError, ValueError):
+            interval = 5.0
+        interval = max(1.0, min(interval, 60.0))
+        if elapsed < interval * 60:
+            continue
+        elapsed = 0.0
+        _sheet_auto_once(cfg, load_status())
 
 
 def sheet_setup_clean(cfg, st):
@@ -1153,7 +1227,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             cfg = load_config()
             st = load_status()
-            self._json({"config": cfg, "status": st})
+            self._json({"config": cfg, "status": st,
+                        "sheet_auto_last": dict(SHEET_AUTO_LAST)})
             return
         if path == "/api/my-ip":
             try:
@@ -1731,7 +1806,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "default_preset": cfg.get("default_preset")})
             elif path == "/api/sheet-settings":
                 # Luu cau hinh Google Sheet (link CSV, dong bat dau, Sheet ID,
-                # duong dan file JSON key service account).
+                # duong dan file JSON key service account, tu dong setup).
                 if "csv_url" in body:
                     cfg["sheet_csv_url"] = str(body.get("csv_url") or "").strip()
                 if "start_row" in body:
@@ -1743,6 +1818,14 @@ class Handler(BaseHTTPRequestHandler):
                     cfg["sheet_id"] = str(body.get("sheet_id") or "").strip()
                 if "sa_key" in body:
                     cfg["sheet_sa_key"] = str(body.get("sa_key") or "").strip()
+                if "auto" in body:
+                    cfg["sheet_auto"] = bool(body.get("auto"))
+                if "interval" in body:
+                    try:
+                        cfg["sheet_auto_interval"] = max(
+                            1, min(60, int(body.get("interval"))))
+                    except (TypeError, ValueError):
+                        pass
                 save_config(cfg)
                 self._json({"ok": True})
             elif path == "/api/sheet-rule":
@@ -1803,7 +1886,15 @@ class Handler(BaseHTTPRequestHandler):
                             "source": src})
             elif path == "/api/sheet-setup":
                 # Setup tuan tu tung dong clean (xong 1 moi qua dong sau).
-                res = sheet_setup_clean(cfg, st)
+                if not SHEET_LOCK.acquire(blocking=False):
+                    self._json({"ok": False,
+                                "error": "đang có 1 lượt setup sheet khác chạy, thử lại sau"},
+                               409)
+                    return
+                try:
+                    res = sheet_setup_clean(cfg, st)
+                finally:
+                    SHEET_LOCK.release()
                 self._json(res)
             elif path == "/api/sheet-setup-one":
                 # Setup 1 dong (frontend goi tuan tu tung hang).
@@ -1813,7 +1904,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not d or not isinstance(row, int) or not preset:
                     self._json({"error": "thiếu domain/row/preset"}, 400)
                     return
-                res = _sheet_setup_one(d, row, preset, cfg, st)
+                if not SHEET_LOCK.acquire(blocking=False):
+                    self._json({"error": "đang có 1 lượt setup sheet khác chạy, thử lại sau"}, 409)
+                    return
+                try:
+                    res = _sheet_setup_one(d, row, preset, cfg, st)
+                finally:
+                    SHEET_LOCK.release()
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": True, "result": res})
@@ -1849,6 +1946,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    threading.Thread(target=_sheet_auto_loop, daemon=True).start()
     print(f"Domain Dashboard chay o http://127.0.0.1:{PORT} (chi local, Ctrl+C de dung)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
