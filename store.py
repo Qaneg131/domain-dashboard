@@ -18,12 +18,15 @@ CONFIG_FILE = BASE_DIR / "config.json"
 STATUS_FILE = BASE_DIR / "status.json"
 
 DEFAULT_CONFIG = {
+    # Mac dinh de trong — khong luu bat cu thong tin nao cua user len git.
+    # Ai clone ve thi tu nhap token/key/ID/domain/sheet o may local, luu
+    # vao config.json (da co trong .gitignore, khong commit).
     "cf_token": "",
-    "cf_account_id": "c30bace6d8d169fb77ae278b7d0fc82a",
-    "nc_user": "tuanah252",
+    "cf_account_id": "",
+    "nc_user": "",
     "nc_api_key": "",
     "nc_client_ip": "",
-    "domains": ["elvellia.com", "welvella.com"],
+    "domains": [],
     # Domain user da xoa khoi bang quan ly — tai danh sach tai khoan se
     # khong tu dua lai (chi them tay moi vao).
     "unmanaged": [],
@@ -60,18 +63,14 @@ DEFAULT_CONFIG = {
     # account: sheet_id = ID trong link edit cua sheet, sa_key = duong
     # dan file JSON key cua service account (da duoc share sheet quyen
     # Editor). Can them: pip install google-auth.
-    "sheet_csv_url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRZX8sJDgllzfV8ZVHeQ8LV6AWmq_y97dy_nBmrlTcoNw2c87NZJM14_cvCXMoBGiuY4_fM8NB45CJ2/pub?gid=724861620&single=true&output=csv",
-    "sheet_start_row": 1402,
+    "sheet_csv_url": "",
+    "sheet_start_row": 1,
     "sheet_id": "",
     "sheet_sa_key": "",
     # Rule map cot H "Loai web" (ten trong sheet) sang preset record.
     # User them/sua/xoa/doi ten tuy y o muc Google Sheet — khong can xoa
-    # tao lai. Mac dinh: Web Thuan Han -> Web Chi Han, Web Thuan Long ->
-    # Web Anh Long.
-    "sheet_rules": [
-        {"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
-        {"name": "Web Thuần Long", "preset": "Web Anh Long"},
-    ],
+    # tao lai.
+    "sheet_rules": [],
     # Hang cho duyet (domain xung dot preset: sheet muon preset khac voi
     # preset domain dang dung) + domain da tu choi (khong dua lai nua).
     "sheet_review": [],

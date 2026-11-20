@@ -40,7 +40,7 @@ class NCError(Exception):
 
 
 def split_domain(domain):
-    """'elvellia.com' -> ('elvellia', 'com')."""
+    """'example.com' -> ('example', 'com')."""
     parts = domain.strip().lower().split(".")
     if len(parts) < 2:
         raise NCError(f"domain khong hop le: {domain}")

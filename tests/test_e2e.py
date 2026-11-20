@@ -37,7 +37,11 @@ def main():
     # status.json) nen E2E phai doc lap, khong phu thuoc lan chay truoc.
     import copy
     import store
-    store.save_config(copy.deepcopy(store.DEFAULT_CONFIG))
+    # Reset config ve mac dinh (trong — khong chua thong tin user), roi
+    # them 2 domain test vao (E2E can 2 domain nay de check).
+    cfg0 = copy.deepcopy(store.DEFAULT_CONFIG)
+    cfg0["domains"] = ["elvellia.com", "welvella.com"]
+    store.save_config(cfg0)
     if store.STATUS_FILE.exists():
         store.STATUS_FILE.unlink()
     mock = ThreadingHTTPServer(("127.0.0.1", MOCK_PORT), MockHandler)
@@ -86,11 +90,15 @@ def main():
     assert call("POST", "/api/presets", {"name": "shop-copy", "records": [
         {"type": "A", "name": "@", "content": "3.3.3.3", "proxied": True}]})["ok"]
 
-    # Sheet rules: them / doi ten (khong can xoa tao lai) / trung ten bi tu choi / xoa.
+    # Sheet rules: mac dinh trong — them 2 rule roi moi test them / doi ten / trung ten / xoa.
+    # (preset trong E2E chi co web/shop/shop-copy nen rule dung 'shop'/'web'.)
     rules0 = call("GET", "/api/state")["config"]["sheet_rules"]
-    assert rules0 == [{"name": "Web Thuần Hân", "preset": "Web Chị Hân"},
-                      {"name": "Web Thuần Long", "preset": "Web Anh Long"}], rules0
-    # (preset trong E2E chi co web/shop/shop-copy nen rule moi dung 'shop'/'web'.)
+    assert rules0 == [], rules0
+    assert call("POST", "/api/sheet-rule", {"name": "Web Thuần Hân", "preset": "web"})["ok"]
+    assert call("POST", "/api/sheet-rule", {"name": "Web Thuần Long", "preset": "shop"})["ok"]
+    rules0 = call("GET", "/api/state")["config"]["sheet_rules"]
+    assert rules0 == [{"name": "Web Thuần Hân", "preset": "web"},
+                      {"name": "Web Thuần Long", "preset": "shop"}], rules0
     r1 = call("POST", "/api/sheet-rule", {"name": "Web Thuần", "preset": "shop"})
     assert r1["ok"] and len(r1["rules"]) == 3, r1
     r2 = call("POST", "/api/sheet-rule", {"index": 2, "name": "Web Thuần Mới", "preset": "web"})
