@@ -553,84 +553,118 @@ def _search_domain_in_list(page, search, domain):
     deadline = time.time() + 12
     while time.time() < deadline:
         if _any_visible(page, domain):
-            return
+            break
         page.wait_for_timeout(400)
-    # Dự phòng: thử bấm Enter rồi chờ thêm.
-    page.keyboard.press("Enter")
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if _any_visible(page, domain):
-            return
-        page.wait_for_timeout(400)
-    shot(page, domain, "nc-domain-not-found")
-    raise RuntimeError(f"không tìm thấy {domain} trong Domain List của Namecheap "
-                       "(đã search mà không ra — kiểm tra domain có ở Namecheap không)")
+    else:
+        # Dự phòng: thử bấm Enter rồi chờ thêm.
+        page.keyboard.press("Enter")
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if _any_visible(page, domain):
+                break
+            page.wait_for_timeout(400)
+        else:
+            shot(page, domain, "nc-domain-not-found")
+            raise RuntimeError(f"không tìm thấy {domain} trong Domain List của Namecheap "
+                               "(đã search mà không ra — kiểm tra domain có ở Namecheap không)")
+    # Cho bộ lọc ổn định hẳn (các dòng khác đang ẩn dần) rồi mới đọc
+    # toggle — đọc ngay có thể vớ phải toggle của dòng khác còn hiện.
+    page.wait_for_timeout(1200)
+    if not _any_visible(page, domain):
+        shot(page, domain, "nc-domain-not-found")
+        raise RuntimeError(f"không tìm thấy {domain} trong Domain List của Namecheap "
+                           "(đã search mà không ra — kiểm tra domain có ở Namecheap không)")
 
 def _autorenew_toggle_state(page, domain):
     """Trang thai toggle Auto-Renew cua domain trong Domain List.
-    Tra ve True (dang BAT), False (dang TAT), None (khong xac dinh
-    duoc). Doc bang JS trong dong chua ten domain: uu tien
-    role=switch + aria-checked, roi input checkbox (ke ca checkbox
-    nam trong toggle), roi class toggle/switch (on/off/active).
-    Neu list da loc chi con 1 domain thi chap nhan toggle duy nhat
-    tren trang lam du phong."""
+    Tra ve (state, detail, cands): state True (dang BAT) / False (dang
+    TAT) / None (khong xac dinh duoc); detail mo ta ngan gon phan tu
+    da doc (de biet vi sao doc dung/sai); cands la cac ung vien da xem.
+    Cach doc (tim DONG chua domain truoc, roi chi tim TRONG dong do —
+    khong doc lung tung ca trang):
+    1. [role="switch"] co aria-checked (tin cay nhat).
+    2. checkbox nam trong container switch/toggle (toggle dang checkbox
+       an + label trang tri). Checkbox chon dong o dau dong KHONG nam
+       trong container switch/toggle nen khong doc no.
+    3. phan tu class switch/toggle co tu on/off/active/checked/enabled/disabled.
+    Loi cu (2026-11-20): doc ca trang bang inDomainRow long leo nen
+    doc nham phan tu khac roi bao 'da BAT' trong khi toggle dang TAT."""
     try:
-        return page.evaluate("""(domain) => {
+        res = page.evaluate("""(domain) => {
           const isVis = e => {
             const r = e.getBoundingClientRect();
             return r.width > 0 && r.height > 0 &&
               getComputedStyle(e).visibility !== 'hidden';
           };
-          const stateOf = el => {
+          const desc = el => {
+            const tag = el.tagName.toLowerCase();
+            const cls = String(el.className || '').slice(0, 90);
             const aria = el.getAttribute('aria-checked');
-            if (aria === 'true') return true;
-            if (aria === 'false') return false;
-            if (el.type === 'checkbox') return !!el.checked;
-            const inner = el.querySelector('input[type="checkbox"]');
-            if (inner) return !!inner.checked;
-            const innerAria = el.querySelector('[aria-checked]');
-            if (innerAria) {
-              const a = innerAria.getAttribute('aria-checked');
-              if (a === 'true') return true;
-              if (a === 'false') return false;
-            }
-            const cls = String(el.className || '').toLowerCase();
-            if (/\\bon\\b|\\bactive\\b|\\bchecked\\b|\\benabled\\b/.test(cls)) return true;
-            if (/\\boff\\b|\\bdisabled\\b/.test(cls)) return false;
-            return null;
+            const chk = el.type === 'checkbox' ? String(!!el.checked) : '-';
+            return tag + '|' + cls + '|aria=' + aria + '|checked=' + chk;
           };
-          const inDomainRow = el => {
-            let a = el;
-            while (a) {
-              if (a.tagName === 'TR' ||
-                  (a.className && /row|domain|item/i.test(String(a.className)))) {
-                return a.textContent.includes(domain);
+          // Tim DONG chua domain: <tr> hien thi co chu domain; neu
+          // layout khong phai bang thi lay to tien gan nhat co class
+          // row/domain/item cua phan tu la chua ten domain.
+          let row = null;
+          const trs = [...document.querySelectorAll('tr')].filter(
+            tr => isVis(tr) && tr.textContent.includes(domain));
+          if (trs.length) row = trs[0];
+          if (!row) {
+            const leaf = [...document.querySelectorAll('*')].find(
+              e => e.children.length === 0 && e.textContent.trim() === domain && isVis(e));
+            if (leaf) {
+              let a = leaf.parentElement;
+              while (a) {
+                if (a.className && /row|domain|item/i.test(String(a.className))) { row = a; break; }
+                a = a.parentElement;
               }
+            }
+          }
+          if (!row) return {state: null, detail: 'khong tim thay dong cua ' + domain, cands: []};
+          const cands = [];
+          // 1. role=switch co aria-checked.
+          for (const el of row.querySelectorAll('[role="switch"]')) {
+            if (!isVis(el)) continue;
+            const aria = el.getAttribute('aria-checked');
+            cands.push('switch:' + desc(el));
+            if (aria === 'true') return {state: true, detail: 'switch aria-checked=true (' + desc(el) + ')', cands};
+            if (aria === 'false') return {state: false, detail: 'switch aria-checked=false (' + desc(el) + ')', cands};
+          }
+          // 2. checkbox trong container switch/toggle.
+          for (const el of row.querySelectorAll('input[type="checkbox"]')) {
+            if (!isVis(el)) continue;
+            let a = el.parentElement, inSw = false;
+            while (a && a !== row) {
+              if (/switch|toggle/i.test(String(a.className || ''))) { inSw = true; break; }
               a = a.parentElement;
             }
-            return false;
-          };
-          const cands = [...document.querySelectorAll(
-            '[role="switch"], input[type="checkbox"], ' +
-            '[class*="toggle" i], [class*="switch" i]')].filter(isVis);
-          for (const el of cands) {
-            if (!inDomainRow(el)) continue;
-            const st = stateOf(el);
-            if (st !== null) return st;
+            cands.push((inSw ? 'toggle-cb:' : 'row-cb:') + desc(el));
+            if (inSw) return {state: !!el.checked, detail: 'toggle checkbox checked=' + el.checked + ' (' + desc(el) + ')', cands};
           }
-          // Du phong: list da loc chi con 1 toggle thi lay no.
-          if (cands.length === 1) {
-            const st = stateOf(cands[0]);
-            if (st !== null) return st;
+          // 3. class switch/toggle co tu on/off.
+          for (const el of row.querySelectorAll('[class*="switch" i], [class*="toggle" i]')) {
+            if (!isVis(el)) continue;
+            const cls = String(el.className || '').toLowerCase();
+            cands.push('cls:' + desc(el));
+            if (/\\bon\\b|\\bactive\\b|\\bchecked\\b|\\benabled\\b/.test(cls))
+              return {state: true, detail: 'class co on/active/checked/enabled (' + desc(el) + ')', cands};
+            if (/\\boff\\b|\\bdisabled\\b/.test(cls))
+              return {state: false, detail: 'class co off/disabled (' + desc(el) + ')', cands};
           }
-          return null;
+          return {state: null, detail: 'khong xac dinh duoc (da xem ' + cands.length + ' ung vien)', cands};
         }""", domain)
-    except Exception:
-        return None
+        if isinstance(res, dict):
+            return res.get("state"), res.get("detail", ""), res.get("cands") or []
+        return None, "ket qua doc toggle khong phai dict", []
+    except Exception as e:
+        return None, "loi khi doc toggle: " + str(e)[:120], []
 
 def _click_autorenew_toggle(page, domain):
-    """Bam toggle Auto-Renew trong dong cua domain (bang JS, khong can
-    biet toggle la the gi). Tra ve True neu bam duoc."""
+    """Bam toggle Auto-Renew trong dong cua domain (bang JS). Tim dong
+    chua domain truoc roi bam switch trong dong do — cung cach tim nhu
+    _autorenew_toggle_state de chac la bam dung cai toggle vua doc.
+    Tra ve True neu bam duoc."""
     try:
         return bool(page.evaluate("""(domain) => {
           const isVis = e => {
@@ -638,26 +672,37 @@ def _click_autorenew_toggle(page, domain):
             return r.width > 0 && r.height > 0 &&
               getComputedStyle(e).visibility !== 'hidden';
           };
-          const inDomainRow = el => {
-            let a = el;
-            while (a) {
-              if (a.tagName === 'TR' ||
-                  (a.className && /row|domain|item/i.test(String(a.className)))) {
-                return a.textContent.includes(domain);
+          let row = null;
+          const trs = [...document.querySelectorAll('tr')].filter(
+            tr => isVis(tr) && tr.textContent.includes(domain));
+          if (trs.length) row = trs[0];
+          if (!row) {
+            const leaf = [...document.querySelectorAll('*')].find(
+              e => e.children.length === 0 && e.textContent.trim() === domain && isVis(e));
+            if (leaf) {
+              let a = leaf.parentElement;
+              while (a) {
+                if (a.className && /row|domain|item/i.test(String(a.className))) { row = a; break; }
+                a = a.parentElement;
               }
+            }
+          }
+          if (!row) return false;
+          for (const el of row.querySelectorAll('[role="switch"]')) {
+            if (isVis(el)) { el.click(); return true; }
+          }
+          for (const el of row.querySelectorAll('input[type="checkbox"]')) {
+            if (!isVis(el)) continue;
+            let a = el.parentElement, inSw = false;
+            while (a && a !== row) {
+              if (/switch|toggle/i.test(String(a.className || ''))) { inSw = true; break; }
               a = a.parentElement;
             }
-            return false;
-          };
-          const cands = [...document.querySelectorAll(
-            '[role="switch"], input[type="checkbox"], ' +
-            '[class*="toggle" i], [class*="switch" i]')].filter(isVis);
-          for (const el of cands) {
-            if (!inDomainRow(el)) continue;
-            el.click();
-            return true;
+            if (inSw) { el.click(); return true; }
           }
-          if (cands.length === 1) { cands[0].click(); return true; }
+          for (const el of row.querySelectorAll('[class*="switch" i], [class*="toggle" i]')) {
+            if (isVis(el)) { el.click(); return true; }
+          }
           return false;
         }""", domain))
     except Exception:
@@ -734,7 +779,10 @@ def autorenew_one(page, domain, enabled=True, privacy_yes=False):
         if not search:
             raise RuntimeError("khong tim thay o Search cua Domain List")
         _search_domain_in_list(page, search, domain)
-        cur = _autorenew_toggle_state(page, domain)
+        cur, detail, cands = _autorenew_toggle_state(page, domain)
+        log(f"    doc toggle {domain}: {detail}")
+        if cands:
+            log(f"    [chẩn đoán] ung vien da xem: {'; '.join(cands[:5])}")
         if cur is None:
             _log_toggle_diagnosis(page, domain)
             raise RuntimeError("khong xac dinh duoc trang thai toggle "
@@ -755,13 +803,14 @@ def autorenew_one(page, domain, enabled=True, privacy_yes=False):
                                        "hop thoai Domain Privacy")
         deadline = time.time() + 15
         while time.time() < deadline:
-            cur2 = _autorenew_toggle_state(page, domain)
+            cur2, detail2, _c = _autorenew_toggle_state(page, domain)
             if cur2 == enabled:
                 log(f"    {domain}: da {'BAT' if enabled else 'TAT'} auto-renew.")
                 return {"domain": domain, "status": "ok", "nameservers": "",
                         "records": "", "error": ""}
             time.sleep(1)
-        raise RuntimeError("bam toggle roi nhung kiem tra lai toggle van chua doi")
+        raise RuntimeError("bam toggle roi nhung kiem tra lai toggle van chua doi "
+                           f"(lan cuoi doc: {detail2})")
     except Exception as e:
         log(f"    {domain}: LOI auto-renew — {e}")
         return {"domain": domain, "status": "failed", "nameservers": "",

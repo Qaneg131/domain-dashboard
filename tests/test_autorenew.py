@@ -39,6 +39,18 @@ LIST_HTML = """<html><body>
   <td><button role="switch" aria-checked="false" class="toggle">toggle</button></td>
   <td>Jan 2, 2027</td><td><a href="#">MANAGE</a></td>
 </tr>
+<tr class="domain-row" data-domain="checkedbox.com">
+  <td><input type="checkbox" class="chk" checked> <a href="#">checkedbox.com</a></td>
+  <td>ACTIVE</td>
+  <td><button role="switch" aria-checked="false" class="toggle">toggle</button></td>
+  <td>Mar 3, 2027</td><td><a href="#">MANAGE</a></td>
+</tr>
+<tr class="domain-row" data-domain="classy.com">
+  <td><a href="#">classy.com</a></td>
+  <td>ACTIVE</td>
+  <td><button class="toggle-switch off">toggle</button></td>
+  <td>Apr 4, 2027</td><td><a href="#">MANAGE</a></td>
+</tr>
 </table>
 <div id="dlg" style="display:none" role="dialog">
   <h2>Turn On Domain Auto-Renewal</h2>
@@ -55,6 +67,16 @@ q.addEventListener('input', () => {
     tr.style.display = (!v || tr.dataset.domain.includes(v)) ? '' : 'none';
   });
 });
+document.querySelectorAll('button.toggle-switch').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.classList.contains('off')) {
+      window._pendingToggle = btn;
+      document.getElementById('dlg').style.display = 'block';
+    } else {
+      btn.classList.remove('on'); btn.classList.add('off');
+    }
+  });
+});
 document.querySelectorAll('button[role="switch"]').forEach(btn => {
   btn.addEventListener('click', () => {
     const on = btn.getAttribute('aria-checked') === 'true';
@@ -67,12 +89,18 @@ document.querySelectorAll('button[role="switch"]').forEach(btn => {
   });
 });
 document.getElementById('dlg-yes').addEventListener('click', () => {
-  if (window._pendingToggle) window._pendingToggle.setAttribute('aria-checked', 'true');
+  if (window._pendingToggle) {
+    window._pendingToggle.setAttribute('aria-checked', 'true');
+    window._pendingToggle.classList.remove('off'); window._pendingToggle.classList.add('on');
+  }
   document.getElementById('dlg').style.display = 'none';
   window._privacyChoice = 'yes';
 });
 document.getElementById('dlg-no').addEventListener('click', () => {
-  if (window._pendingToggle) window._pendingToggle.setAttribute('aria-checked', 'true');
+  if (window._pendingToggle) {
+    window._pendingToggle.setAttribute('aria-checked', 'true');
+    window._pendingToggle.classList.remove('off'); window._pendingToggle.classList.add('on');
+  }
   document.getElementById('dlg').style.display = 'none';
   window._privacyChoice = 'no';
 });
@@ -125,6 +153,19 @@ def main():
         assert toggle_state(page, "mixbudget.com") is True
         assert page.evaluate("window._privacyChoice") == "yes", "phai bam Yes cho Privacy"
         print("  OK: da BAT, hop thoai bam Yes.", flush=True)
+
+        print("TEST E: checkbox chon dong da TICK + toggle TAT -> phai doc toggle (TAT), khong bi checkbox lua.", flush=True)
+        assert toggle_state(page, "checkedbox.com") is False
+        r = cs.autorenew_one(page, "checkedbox.com", enabled=True, privacy_yes=False)
+        assert r["status"] == "ok", r
+        assert toggle_state(page, "checkedbox.com") is True, "toggle chua BAT sau khi bam"
+        print("  OK: doc dung toggle TAT du checkbox dong dang TICK.", flush=True)
+
+        print("TEST F: toggle dang class (khong aria-checked), class 'off' -> phai doc TAT roi bam len BAT.", flush=True)
+        r = cs.autorenew_one(page, "classy.com", enabled=True, privacy_yes=False)
+        assert r["status"] == "ok", r
+        assert page.evaluate("() => document.querySelector('tr[data-domain=\"classy.com\"] button.toggle-switch').classList.contains('on')"), "toggle classy.com chua BAT"
+        print("  OK: doc dung class off, bam len on.", flush=True)
 
         print("TEST D: domain khong co trong list -> failed (khong crash).", flush=True)
         r = cs.autorenew_one(page, "khongco.com", enabled=True, privacy_yes=False)
