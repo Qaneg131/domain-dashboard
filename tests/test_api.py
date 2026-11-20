@@ -1432,7 +1432,7 @@ def main():
     assert "khongco.com" not in exp_map
     print("  OK", flush=True)
 
-    print("TEST 47: _setup_tool_dir — tu tim thu muc domain-setup-tool ke ben + nhap tay + khong co thi None...", flush=True)
+    print("TEST 47: _setup_tool_dir — tu tim tool Chrome o nhieu vi tri + nhap tay + bao loi kem cac duong da check...", flush=True)
     import app as dash_app
     from store import BASE_DIR as DASH_BASE
     cfg47 = {"setup_tool_dir": ""}
@@ -1443,9 +1443,17 @@ def main():
     # Nhap tay duong dan dung thi dung duong dan do.
     cfg47 = {"setup_tool_dir": str(found)}
     assert dash_app._setup_tool_dir(cfg47) == found
-    # Nhap tay duong dan sai / khong co chrome_setup.py thi None.
-    assert dash_app._setup_tool_dir({"setup_tool_dir": "/khong/co/thu/muc"}) is None
-    assert dash_app._setup_tool_dir({"setup_tool_dir": str(DASH_BASE)}) is None
+    # Nhap tay duong dan sai thi tu roi ve tu dong tim (khong dung
+    # ngay) — van tim thay thu muc ke ben.
+    assert dash_app._setup_tool_dir({"setup_tool_dir": "/khong/co/thu/muc"}) == found
+    # Danh sach cac duong se check: duong nhap tay dung dau, roi cac
+    # vi tri mac dinh; thong bao loi phai liet ke het cac duong do.
+    cands = dash_app._setup_tool_candidates({"setup_tool_dir": "/khong/co/thu/muc"})
+    assert str(cands[0]) == "/khong/co/thu/muc", cands
+    assert str(DASH_BASE.parent / "domain-setup-tool") in [str(p) for p in cands]
+    msg47 = dash_app._setup_tool_not_found_msg({"setup_tool_dir": "/khong/co/thu/muc"})
+    assert "khong tim thay tool Chrome" in msg47 and "/khong/co/thu/muc" in msg47, msg47
+    assert "Thu muc tool Chrome" in msg47, msg47
     print("  OK", flush=True)
 
     srv.shutdown()

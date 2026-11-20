@@ -13,6 +13,10 @@
   .sidebar .brand { padding: 0 20px 4px; font-size: 22px; font-weight: 700; letter-spacing: .01em; }
   .sidebar .brand span { color: #cf9a5f; }
   .sidebar .brand-sub { padding: 0 20px 18px; margin: 0; color: #b8b0a4; font-size: 12.5px; line-height: 1.6; }
+  .sidebar .nav { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+  .sidebar .nav-item { display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 8px; background: transparent; color: #d8d0c2; font-size: 14px; font-weight: 600; border: 1px solid transparent; }
+  .sidebar .nav-item:hover { background: #2e2822; color: #fff; }
+  .sidebar .nav-item.active { background: #2e2822; color: #fff; border-color: #a06a35; box-shadow: inset 3px 0 0 #cf9a5f; }
   @media (max-width: 760px) {
     .layout { display: block; }
     .sidebar { width: auto; height: auto; position: static; padding: 14px 0; }
@@ -108,8 +112,13 @@
   <nav class="sidebar">
     <div class="brand">Domain <span>Dashboard</span></div>
     <p class="brand-sub">Namecheap + Cloudflare bằng API — không cần mở Chrome. Bấm Setup là tự chạy hết.</p>
+    <div class="nav">
+      <button class="nav-item active" id="navMain" onclick="showView('main')">Quản lý domain</button>
+      <button class="nav-item" id="navAr" onclick="showView('ar')">Auto-renew</button>
+    </div>
   </nav>
 <main>
+  <div id="viewMain">
   <div class="card">
     <details id="settingsBox">
       <summary>Cài đặt — Cloudflare token &amp; Namecheap API (bấm để mở)</summary>
@@ -189,24 +198,6 @@
     <div class="row" style="margin-top:8px">
       <button onclick="setupBatch()">Setup danh sách</button>
       <button class="secondary" onclick="addBatchToManaged()">Thêm các domain này vào bảng quản lý</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Auto-renew (bằng Chrome) — bật tự động gia hạn trên Namecheap</h2>
-    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: dán list domain, chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain trong ô này.</p>
-    <textarea id="arDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="example.com&#10;example.net"></textarea>
-    <div class="row" style="margin-top:8px">
-      <label>Hộp thoại Domain Privacy</label>
-      <select id="arPrivacy">
-        <option value="no">Chỉ bật cho domain (bấm No)</option>
-        <option value="yes">Bật luôn cả Domain Privacy (bấm Yes)</option>
-      </select>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button onclick="openArNamecheap()">1. Mở Namecheap</button>
-      <button onclick="runArBrowser()">2. Bắt đầu bật auto-renew</button>
-      <span class="muted" id="arMsg"></span>
     </div>
   </div>
 
@@ -309,6 +300,28 @@
     <div class="row" id="pager"></div>
     </div>
   </div>
+  </div>
+
+  <div id="viewAr" style="display:none">
+  <div class="card">
+    <h2>Auto-renew (bằng Chrome) — bật tự động gia hạn trên Namecheap</h2>
+    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: dán list domain, chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain trong ô này.</p>
+    <textarea id="arDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="example.com&#10;example.net"></textarea>
+    <div class="row" style="margin-top:8px">
+      <label>Hộp thoại Domain Privacy</label>
+      <select id="arPrivacy">
+        <option value="no">Chỉ bật cho domain (bấm No)</option>
+        <option value="yes">Bật luôn cả Domain Privacy (bấm Yes)</option>
+      </select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button onclick="openArNamecheap()">1. Mở Namecheap</button>
+      <button onclick="runArBrowser()">2. Bắt đầu bật auto-renew</button>
+      <span class="muted" id="arMsg"></span>
+    </div>
+  </div>
+  </div>
+
   <div class="card">
     <h2>Kết quả chạy</h2>
     <div id="diagnosisBox"></div>
@@ -481,6 +494,20 @@ function showDiagnosis(results) {
   if (!items.length) { box.innerHTML = ''; return; }
   box.innerHTML = items.map(it => `<div class="diag"><div class="err">✗ ${esc(it.domain || '')}: ${esc(it.error)}</div><div class="fix">✓ Cách sửa: ${esc(it.fix)}</div></div>`).join('');
 }
+// ---------------------------------------------------------------- tab sidebar
+// Sidebar co 2 tab: "Quan ly domain" (toan bo card cu) va "Auto-renew"
+// (chi card Auto-renew). Card "Ket qua chay" nam ngoai ca 2 tab nen
+// luon hien — log cua Auto-renew cung hien o do.
+function showView(name) {
+  const main = document.getElementById('viewMain');
+  const ar = document.getElementById('viewAr');
+  const isAr = name === 'ar';
+  if (main) main.style.display = isAr ? 'none' : '';
+  if (ar) ar.style.display = isAr ? '' : 'none';
+  document.getElementById('navMain').classList.toggle('active', !isAr);
+  document.getElementById('navAr').classList.toggle('active', isAr);
+}
+
 function api(path, body) {
   return fetch(path, { method: body ? 'POST' : 'GET',
     headers: { 'Content-Type': 'application/json' },

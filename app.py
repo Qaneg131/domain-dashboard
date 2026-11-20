@@ -80,20 +80,47 @@ def _nc_configured(cfg):
 # nen goi sang tool Chrome domain-setup-tool (chrome_setup.py) dang
 # subprocess — dung lai logic da test o ben do (doc trang thai toggle
 # truoc, da BAT thi bo qua, chi bam khi TAT, xu ly hop thoai Privacy).
-def _setup_tool_dir(cfg):
-    """Thu muc chua chrome_setup.py: gia tri user nhap (setup_tool_dir)
-    uu tien; de trong thi tu tim thu muc 'domain-setup-tool' nam canh
-    thu muc dashboard nay. Tra ve Path, hoac None neu khong tim thay."""
+def _setup_tool_candidates(cfg):
+    """Cac thu muc co the chua chrome_setup.py, theo thu tu uu tien:
+    gia tri user nhap (setup_tool_dir) truoc, roi cac vi tri thuong gap
+    (canh dashboard, trong dashboard, thu muc home, Desktop, thu muc
+    hien tai)."""
+    cands = []
     cand = str(cfg.get("setup_tool_dir") or "").strip()
     if cand:
-        p = Path(cand).expanduser()
+        cands.append(Path(cand).expanduser())
+    base = BASE_DIR
+    cands += [base.parent / "domain-setup-tool",
+              base / "domain-setup-tool",
+              Path.home() / "domain-setup-tool",
+              Path.home() / "Desktop" / "domain-setup-tool",
+              Path.cwd() / "domain-setup-tool"]
+    # Loai trung (giu thu tu).
+    seen, out = set(), []
+    for p in cands:
+        k = str(p)
+        if k not in seen:
+            seen.add(k)
+            out.append(p)
+    return out
+
+
+def _setup_tool_dir(cfg):
+    """Thu muc chua chrome_setup.py: gia tri user nhap (setup_tool_dir)
+    uu tien; de trong thi tim o cac vi tri thuong gap. Tra ve Path,
+    hoac None neu khong tim thay o dau."""
+    for p in _setup_tool_candidates(cfg):
         if (p / "chrome_setup.py").is_file():
             return p
-        return None
-    p = BASE_DIR.parent / "domain-setup-tool"
-    if (p / "chrome_setup.py").is_file():
-        return p
     return None
+
+
+def _setup_tool_not_found_msg(cfg):
+    checked = "; ".join(str(p) for p in _setup_tool_candidates(cfg))
+    return ("khong tim thay tool Chrome domain-setup-tool "
+            "(can chrome_setup.py) — da tim o: " + checked +
+            ". Nhap dung duong dan thu muc domain-setup-tool vao o "
+            "\"Thu muc tool Chrome\" trong muc Cai dat roi Luu.")
 
 
 def _run_chrome_setup(setup_dir, args):
@@ -1567,11 +1594,7 @@ class Handler(BaseHTTPRequestHandler):
                 setup_dir = _setup_tool_dir(cfg)
                 if setup_dir is None:
                     self._json({"ok": False, "error":
-                                "khong tim thay tool Chrome domain-setup-tool "
-                                "(can chrome_setup.py) — kiem tra o "
-                                "\"Thu muc tool Chrome\" trong muc Cai dat, "
-                                "hoac dat thu muc domain-setup-tool canh "
-                                "thu muc dashboard"}, 400)
+                                _setup_tool_not_found_msg(cfg)}, 400)
                     return
                 rc, logtxt = _run_chrome_setup(setup_dir, ["--prepare-nc"])
                 self._json({"ok": rc == 0, "log": logtxt})
@@ -1582,11 +1605,7 @@ class Handler(BaseHTTPRequestHandler):
                 setup_dir = _setup_tool_dir(cfg)
                 if setup_dir is None:
                     self._json({"ok": False, "error":
-                                "khong tim thay tool Chrome domain-setup-tool "
-                                "(can chrome_setup.py) — kiem tra o "
-                                "\"Thu muc tool Chrome\" trong muc Cai dat, "
-                                "hoac dat thu muc domain-setup-tool canh "
-                                "thu muc dashboard"}, 400)
+                                _setup_tool_not_found_msg(cfg)}, 400)
                     return
                 raw = body.get("domains") or []
                 if isinstance(raw, str):

@@ -297,21 +297,56 @@ def main():
     assert exp["expiry"]["ar2.com"] == "2027-01-15", exp
     print("EXPIRY OK: ngay het han tu Namecheap getList, dang YYYY-MM-DD", flush=True)
 
-    # Auto-renew bang Chrome: khi thu muc tool Chrome khong tim thay thi
-    # ca 2 endpoint bao loi 400 ro rang (khong chay Chrome that o day).
-    call("POST", "/api/settings", {"setup_tool_dir": "/khong/co/thu/muc"})
-    for pth, bdy in (("/api/autorenew-browser-prepare", {}),
-                     ("/api/autorenew-browser", {"domains": ["ar1.com"], "privacy": "no"})):
-        try:
-            call("POST", pth, bdy)
-            raise AssertionError(f"{pth} phai bao 400 khi khong co tool Chrome")
-        except urllib.error.HTTPError as e:
-            assert e.code == 400, e
-            payload = json.loads(e.read().decode())
-            assert "khong tim thay tool Chrome" in payload.get("error", ""), payload
+    # Auto-renew bang Chrome: dung tool Chrome GIA (fake chrome_setup.py)
+    # de test toan bo duong day subprocess + doc bao cao CSV ma khong
+    # mo Chrome that. Fake ghi bao cao CSV giong that.
+    import tempfile
+    fake_dir = tempfile.mkdtemp(prefix="fake-setup-tool-")
+    os.makedirs(os.path.join(fake_dir, "reports"), exist_ok=True)
+    fake_lines = [
+        "import argparse, csv, os, sys",
+        "p = argparse.ArgumentParser()",
+        "p.add_argument('--prepare-nc', action='store_true')",
+        "p.add_argument('--autorenew')",
+        "p.add_argument('--privacy', default='no')",
+        "p.add_argument('--domains-file')",
+        "p.add_argument('--keep-open', action='store_true')",
+        "a = p.parse_args()",
+        "if a.prepare_nc:",
+        "    print('fake: da mo tab Namecheap')",
+        "    sys.exit(0)",
+        "doms = [l.strip() for l in open(a.domains_file, encoding='utf-8') if l.strip()]",
+        "out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports', 'chrome_setup_20260101_000000.csv')",
+        "with open(out, 'w', newline='', encoding='utf-8') as fh:",
+        "    w = csv.writer(fh)",
+        "    w.writerow(['domain', 'status', 'nameservers', 'records', 'error'])",
+        "    for i, d in enumerate(doms):",
+        "        w.writerow([d, 'da-bat' if i == 0 else 'ok', '', '', ''])",
+        "print('fake: xong', len(doms), 'domain')",
+    ]
+    with open(os.path.join(fake_dir, "chrome_setup.py"), "w", encoding="utf-8") as f:
+        f.write("\n".join(fake_lines) + "\n")
+    call("POST", "/api/settings", {"setup_tool_dir": fake_dir})
+    prep = call("POST", "/api/autorenew-browser-prepare", {})
+    assert prep["ok"], prep
+    assert "fake: da mo tab Namecheap" in prep.get("log", ""), prep
+    ar = call("POST", "/api/autorenew-browser",
+              {"domains": ["ar1.com", "ar2.com"], "privacy": "no"})
+    assert ar["ok"], ar
+    assert len(ar["results"]) == 2, ar
+    assert ar["results"][0]["domain"] == "ar1.com" and ar["results"][0]["status"] == "da-bat", ar
+    assert ar["results"][1]["status"] == "ok", ar
+    # Khong nhap domain nao thi bao loi 400 (khong phu thuoc tool).
+    try:
+        call("POST", "/api/autorenew-browser", {"domains": [], "privacy": "no"})
+        raise AssertionError("autorenew phai bao 400 khi khong co domain")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e
+        payload = json.loads(e.read().decode())
+        assert "chua nhap domain" in payload.get("error", ""), payload
     # Tra lai mac dinh (tu tim thu muc ke ben) de khong anh huong test sau.
     call("POST", "/api/settings", {"setup_tool_dir": ""})
-    print("AUTORENEW-BROWSER OK: khong co tool Chrome thi bao loi 400 ro rang", flush=True)
+    print("AUTORENEW-BROWSER OK: prepare + chay fake tool + doc CSV + bao loi khi khong co domain", flush=True)
     mock.shutdown()
     print("E2E OK")
 
