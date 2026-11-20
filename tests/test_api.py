@@ -1432,6 +1432,22 @@ def main():
     assert "khongco.com" not in exp_map
     print("  OK", flush=True)
 
+    print("TEST 47: _setup_tool_dir — tu tim thu muc domain-setup-tool ke ben + nhap tay + khong co thi None...", flush=True)
+    import app as dash_app
+    from store import BASE_DIR as DASH_BASE
+    cfg47 = {"setup_tool_dir": ""}
+    found = dash_app._setup_tool_dir(cfg47)
+    # Trong repo nay, thu muc domain-setup-tool nam canh dashboard.
+    assert found is not None and (found / "chrome_setup.py").is_file(), found
+    assert found == DASH_BASE.parent / "domain-setup-tool", found
+    # Nhap tay duong dan dung thi dung duong dan do.
+    cfg47 = {"setup_tool_dir": str(found)}
+    assert dash_app._setup_tool_dir(cfg47) == found
+    # Nhap tay duong dan sai / khong co chrome_setup.py thi None.
+    assert dash_app._setup_tool_dir({"setup_tool_dir": "/khong/co/thu/muc"}) is None
+    assert dash_app._setup_tool_dir({"setup_tool_dir": str(DASH_BASE)}) is None
+    print("  OK", flush=True)
+
     srv.shutdown()
     print("ALL TESTS PASSED")
 

@@ -81,6 +81,11 @@ DEFAULT_CONFIG = {
     # Domain xung dot preset thi chi dua vao hang cho duyet, khong tu setup.
     "sheet_auto": False,
     "sheet_auto_interval": 5,
+    # Thu muc chua tool Chrome domain-setup-tool (co chrome_setup.py) de
+    # chay che do Auto-renew bang trinh duyet. De trong thi tu tim thu
+    # muc 'domain-setup-tool' nam canh thu muc dashboard nay (vd
+    # C:\Users\Quoc An\domain-setup-tool). Chi can neu de o cho khac.
+    "setup_tool_dir": "",
 }
 
 

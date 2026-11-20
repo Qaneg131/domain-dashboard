@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -295,6 +296,22 @@ def main():
     assert exp["expiry"]["ar1.com"] == "2026-12-04", exp
     assert exp["expiry"]["ar2.com"] == "2027-01-15", exp
     print("EXPIRY OK: ngay het han tu Namecheap getList, dang YYYY-MM-DD", flush=True)
+
+    # Auto-renew bang Chrome: khi thu muc tool Chrome khong tim thay thi
+    # ca 2 endpoint bao loi 400 ro rang (khong chay Chrome that o day).
+    call("POST", "/api/settings", {"setup_tool_dir": "/khong/co/thu/muc"})
+    for pth, bdy in (("/api/autorenew-browser-prepare", {}),
+                     ("/api/autorenew-browser", {"domains": ["ar1.com"], "privacy": "no"})):
+        try:
+            call("POST", pth, bdy)
+            raise AssertionError(f"{pth} phai bao 400 khi khong co tool Chrome")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400, e
+            payload = json.loads(e.read().decode())
+            assert "khong tim thay tool Chrome" in payload.get("error", ""), payload
+    # Tra lai mac dinh (tu tim thu muc ke ben) de khong anh huong test sau.
+    call("POST", "/api/settings", {"setup_tool_dir": ""})
+    print("AUTORENEW-BROWSER OK: khong co tool Chrome thi bao loi 400 ro rang", flush=True)
     mock.shutdown()
     print("E2E OK")
 

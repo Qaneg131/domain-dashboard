@@ -18,8 +18,13 @@ Can (nhap o muc Cai dat):
 - Namecheap API key + whitelist IP may nay (Profile -> Tools -> API Access)
 Chi chay local (127.0.0.1), token/key chi luu o config.json tren may nay.
 """
+import csv
+import glob
 import json
 import os
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -66,6 +71,58 @@ def _doh(domain):
 
 def _nc_configured(cfg):
     return bool(cfg.get("nc_user") and cfg.get("nc_api_key") and cfg.get("nc_client_ip"))
+
+
+# ------------------------------------------------------------------ auto-renew
+# API setAutoRenew cua Namecheap bao IsSuccess=true nhung toggle tren
+# web khong doi (da xac minh 2026-11-20) nen auto-renew phai bam toggle
+# that tren trinh duyet. Dashboard tu no khong dieu khien duoc Chrome
+# nen goi sang tool Chrome domain-setup-tool (chrome_setup.py) dang
+# subprocess — dung lai logic da test o ben do (doc trang thai toggle
+# truoc, da BAT thi bo qua, chi bam khi TAT, xu ly hop thoai Privacy).
+def _setup_tool_dir(cfg):
+    """Thu muc chua chrome_setup.py: gia tri user nhap (setup_tool_dir)
+    uu tien; de trong thi tu tim thu muc 'domain-setup-tool' nam canh
+    thu muc dashboard nay. Tra ve Path, hoac None neu khong tim thay."""
+    cand = str(cfg.get("setup_tool_dir") or "").strip()
+    if cand:
+        p = Path(cand).expanduser()
+        if (p / "chrome_setup.py").is_file():
+            return p
+        return None
+    p = BASE_DIR.parent / "domain-setup-tool"
+    if (p / "chrome_setup.py").is_file():
+        return p
+    return None
+
+
+def _run_chrome_setup(setup_dir, args):
+    """Chay chrome_setup.py nhu subprocess, doi xong, tra ve
+    (returncode, log stdout+stderr)."""
+    cmd = [sys.executable, str(setup_dir / "chrome_setup.py")] + args
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, encoding="utf-8", errors="replace",
+                          env=env, cwd=str(setup_dir))
+    return proc.returncode, proc.stdout or ""
+
+
+def _read_newest_ar_report(setup_dir, before):
+    """Doc bao cao CSV moi nhat ma chrome_setup.py vua ghi (reports/
+    chrome_setup_*.csv) — so voi danh sach file truoc khi chay de chi
+    lay file moi. Tra ve list dict {domain, status, error}."""
+    after = set(glob.glob(str(setup_dir / "reports" / "chrome_setup_*.csv")))
+    new = sorted(after - before)
+    if not new:
+        return []
+    try:
+        with open(new[-1], encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        return [{"domain": r.get("domain", ""), "status": r.get("status", ""),
+                 "error": r.get("error", "")} for r in rows]
+    except Exception:
+        return []
 
 
 def _records_match(records, preset, domain):
@@ -1371,7 +1428,8 @@ class Handler(BaseHTTPRequestHandler):
         st = load_status()
         try:
             if path == "/api/settings":
-                for k in ("cf_token", "cf_account_id", "nc_user", "nc_api_key", "nc_client_ip"):
+                for k in ("cf_token", "cf_account_id", "nc_user", "nc_api_key", "nc_client_ip",
+                          "setup_tool_dir"):
                     if k in body:
                         cfg[k] = str(body[k]).strip()
                 save_config(cfg)
@@ -1503,6 +1561,58 @@ class Handler(BaseHTTPRequestHandler):
                 save_status(st)
                 self._json({"ok": all(r["ok"] for r in results), "results": results,
                             "rate_limited": rate_limited})
+            elif path == "/api/autorenew-browser-prepare":
+                # Nut 1 (tab Auto-renew): mo tab Namecheap Domain List de
+                # dang nhap truoc — chay chrome_setup.py --prepare-nc.
+                setup_dir = _setup_tool_dir(cfg)
+                if setup_dir is None:
+                    self._json({"ok": False, "error":
+                                "khong tim thay tool Chrome domain-setup-tool "
+                                "(can chrome_setup.py) — kiem tra o "
+                                "\"Thu muc tool Chrome\" trong muc Cai dat, "
+                                "hoac dat thu muc domain-setup-tool canh "
+                                "thu muc dashboard"}, 400)
+                    return
+                rc, logtxt = _run_chrome_setup(setup_dir, ["--prepare-nc"])
+                self._json({"ok": rc == 0, "log": logtxt})
+            elif path == "/api/autorenew-browser":
+                # Nut 2 (tab Auto-renew): bam toggle Auto-Renew that tren
+                # Chrome cho tung domain trong danh sach. Domain nao toggle
+                # da BAT roi thi ben Chrome tu bo qua (khong bam).
+                setup_dir = _setup_tool_dir(cfg)
+                if setup_dir is None:
+                    self._json({"ok": False, "error":
+                                "khong tim thay tool Chrome domain-setup-tool "
+                                "(can chrome_setup.py) — kiem tra o "
+                                "\"Thu muc tool Chrome\" trong muc Cai dat, "
+                                "hoac dat thu muc domain-setup-tool canh "
+                                "thu muc dashboard"}, 400)
+                    return
+                raw = body.get("domains") or []
+                if isinstance(raw, str):
+                    raw = raw.splitlines()
+                seen, domains = set(), []
+                for x in raw:
+                    d = str(x).strip().lower()
+                    if d and "." in d and d not in seen:
+                        seen.add(d)
+                        domains.append(d)
+                if not domains:
+                    self._json({"ok": False, "error": "chua nhap domain nao"}, 400)
+                    return
+                privacy = "yes" if str(body.get("privacy") or "").strip().lower() == "yes" else "no"
+                before = set(glob.glob(str(setup_dir / "reports" / "chrome_setup_*.csv")))
+                tmpdir = Path(tempfile.mkdtemp(prefix="dashboard-ar-"))
+                dom_file = tmpdir / "domains.txt"
+                dom_file.write_text("\n".join(domains) + "\n", encoding="utf-8")
+                rc, logtxt = _run_chrome_setup(setup_dir, [
+                    "--domains-file", str(dom_file),
+                    "--autorenew", "on", "--privacy", privacy, "--keep-open"])
+                results = _read_newest_ar_report(setup_dir, before)
+                self._json({"ok": rc == 0 and bool(results),
+                            "results": results, "log": logtxt,
+                            "error": "" if results else
+                            "chay xong nhung khong doc duoc bao cao — xem log"})
             elif path == "/api/email-preset":
                 ep = {"enabled": bool(body.get("enabled", True)), "rules": []}
                 for r in (body.get("rules") or []):
