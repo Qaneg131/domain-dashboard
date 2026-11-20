@@ -25,6 +25,13 @@ PROD = "https://api.namecheap.com/xml.response"
 # nc_api.NC_RETRY_WAITS = (0, 0) de khoi doi.)
 NC_RETRY_WAITS = (30, 60)
 
+# Sau khi setAutoRenew bao IsSuccess=true, doi roi doc lai trang thai
+# qua getList de xac minh (da co truong hop API bao xong nhung toggle
+# tren Namecheap van chua doi). Doi lan 1 roi doc, neu chua khop thi
+# doi them lan 2 roi doc lai 1 lan nua. (Test dat
+# nc_api.AUTORENEW_VERIFY_WAITS = (0, 0) de khoi doi.)
+AUTORENEW_VERIFY_WAITS = (2, 3)
+
 
 def _is_rate_limit_msg(msg):
     m = str(msg or "").lower()
@@ -136,8 +143,23 @@ class NCClient:
             raise NCError("setCustom khong tra ve Updated=true")
         return True
 
+    def get_auto_renew(self, domain):
+        """Trang thai auto-renew hien tai qua getList. Tra ve True/False,
+        None neu khong tim thay domain (getList khong tra ve)."""
+        d = domain.strip().lower()
+        root = self._call("namecheap.domains.getList", ListType="ALL",
+                          SearchTerm=d, Page="1", PageSize="100")
+        for el in root.findall(".//Domain"):
+            if (el.get("Name") or "").strip().lower() == d:
+                ar = el.get("AutoRenew")
+                if ar is None:
+                    return None
+                return ar.strip().lower() == "true"
+        return None
+
     def set_auto_renew(self, domain, enabled):
-        """Bat/tat auto-renew cho 1 domain. Tra ve True neu ap dung duoc.
+        """Bat/tat auto-renew cho 1 domain. Tra ve True neu ap dung duoc
+        VA xac minh lai thay trang thai da doi that.
 
         Dung lenh namecheap.domains.setAutoRenew — lenh nay khong co
         trong bang method cong khai cua Namecheap nhung chay that
@@ -145,6 +167,14 @@ class NCClient:
         KHONG dung dang SLD/TLD — dang do bi tu choi) + IsAutoRenew
         ("true"/"false"). Chu y: lenh tra ve co IsSuccess RIENG trong
         envelope OK, phai doc flag nay chu khong chi tin Status=OK.
+        Ten element ket qua that la SetAutoRenewResult.
+
+        QUAN TRONG: chi tin IsSuccess la chua du — da co truong hop
+        API bao IsSuccess=true nhung toggle tren Namecheap van chua
+        doi (kiem chung tren tai khoan that 2026-11-20). Nen sau khi
+        set xong, ham doc lai trang thai qua getList de xac minh:
+        neu doc lai thay chua doi thi bao loi (khong bao thanh cong
+        ao); neu khong doc duoc trang thai thi tin IsSuccess.
         """
         d = domain.strip().lower()
         if "." not in d:
@@ -152,9 +182,9 @@ class NCClient:
         root = self._call("namecheap.domains.setAutoRenew",
                           DomainName=d,
                           IsAutoRenew="true" if enabled else "false")
-        # Tim element ket qua (ten theo quy uoc la DomainSetAutoRenewResult);
-        # phong khi ten khac thi tim bat ky element nao co 'AutoRenew'.
-        el = root.find(".//DomainSetAutoRenewResult")
+        # Ten element that la SetAutoRenewResult; phong khi ten khac thi
+        # tim bat ky element nao co 'AutoRenew'.
+        el = root.find(".//SetAutoRenewResult")
         if el is None:
             for cand in root.iter():
                 if "AutoRenew" in cand.tag:
@@ -165,4 +195,19 @@ class NCClient:
         if el.get("IsSuccess") != "true":
             raise NCError(
                 f"setAutoRenew tra ve IsSuccess={el.get('IsSuccess')}")
-        return True
+        # Xac minh lai trang thai that qua getList.
+        cur = None
+        for wait in AUTORENEW_VERIFY_WAITS:
+            time.sleep(wait)
+            try:
+                cur = self.get_auto_renew(d)
+            except NCError:
+                # Khong doc duoc trang thai — tin IsSuccess.
+                return True
+            if cur is None or cur == enabled:
+                return True
+        raise NCError(
+            f"Namecheap bao xong nhung kiem tra lai van "
+            f"{'bat' if cur else 'tat'} — co the chua ap dung ngay, "
+            f"kiem tra lai tren Namecheap sau vai phut (va kiem tra "
+            f"tai khoan co the/card hop le de gia han tu dong)")

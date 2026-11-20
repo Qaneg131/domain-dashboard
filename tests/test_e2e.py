@@ -297,7 +297,12 @@ def main():
     assert ar_off["results"][0]["ok"] and STATE["nc_autorenew"]["ar1.com"] is False, ar_off
     ar_fail = call("POST", "/api/autorenew", {"domains": ["failar.com"], "enabled": True})
     assert ar_fail["results"][0]["ok"] is False, ar_fail
-    print("AUTO-RENEW OK: bat/tat theo danh sach, IsSuccess=false thi bao loi", flush=True)
+    # stuckar.com: API bao IsSuccess=true nhung trang thai khong doi ->
+    # buoc xac minh lai phai bao loi chu khong bao xong.
+    ar_stuck = call("POST", "/api/autorenew", {"domains": ["stuckar.com"], "enabled": True})
+    assert ar_stuck["results"][0]["ok"] is False, ar_stuck
+    assert "kiem tra lai" in ar_stuck["results"][0]["detail"], ar_stuck
+    print("AUTO-RENEW OK: bat/tat theo danh sach, IsSuccess=false thi bao loi, xac minh lai bat loi that", flush=True)
     mock.shutdown()
     print("E2E OK")
 
