@@ -53,11 +53,10 @@ LIST_HTML = """<html><body>
 </tr>
 </table>
 <div id="dlg" style="display:none" role="dialog">
-  <h2>Turn On Domain Auto-Renewal</h2>
-  <p>You're about to turn on auto-renewal for your domain. Would you like
-  to turn on auto-renewal for your domain's Domain Privacy service as well?</p>
-  <button id="dlg-yes">Yes</button>
-  <button id="dlg-no">No</button>
+  <div class="modal-header"><h2>Turn On Domain Auto-Renewal</h2><span class="close">x</span></div>
+  <div class="modal-body"><p>You're about to turn on auto-renewal for your domain. Would you like
+  to turn on auto-renewal for your domain's Domain Privacy service as well?</p></div>
+  <div class="modal-footer"><button id="dlg-yes">Yes</button><button id="dlg-no">No</button></div>
 </div>
 <script>
 const q = document.getElementById('q');

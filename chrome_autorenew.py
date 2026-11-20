@@ -710,46 +710,65 @@ def _click_autorenew_toggle(page, domain):
 
 def _click_privacy_dialog(page, want_yes):
     """Bam Yes/No trong hop thoai 'Turn On Domain Auto-Renewal' (hoi co
-    bat luon auto-renew cho Domain Privacy khong). Tim nut trong khung
-    dialog chua tieu de do; du phong tim trong to tien gan nhat chua
-    ca tieu de va nut. Tra ve True neu bam duoc."""
+    bat luon auto-renew cho Domain Privacy khong). Tra ve True neu
+    bam duoc.
+    Loi cu (2026-11-20): lay to tien DAU TIEN co class modal/dialog lam
+    khung — tieu de nam trong 'modal-header' nen khung chi gom header,
+    khong chua nut Yes/No o footer -> khong tim thay nut. Gio lay to
+    tien GAN NHAT chua CA tieu de VA nut Yes/No, roi du phong bang
+    Playwright role=button / text chinh xac."""
     label = "Yes" if want_yes else "No"
+    # Cach 1: JS — khung la to tien gan nhat chua ca tieu de va nut.
     try:
-        return bool(page.evaluate("""(label) => {
+        ok = page.evaluate("""(label) => {
           const isVis = e => {
             const r = e.getBoundingClientRect();
             return r.width > 0 && r.height > 0 &&
               getComputedStyle(e).visibility !== 'hidden';
           };
+          const isBtn = b => isVis(b) && b.textContent.trim() === label;
           const titleEls = [...document.querySelectorAll('*')].filter(
             e => e.children.length === 0 &&
               e.textContent.includes('Turn On Domain Auto-Renewal') && isVis(e));
           let scope = document;
           if (titleEls.length) {
+            // Di len tu tieu de, lay to tien GAN NHAT chua nut Yes/No
+            // (khung dialog that — modal-header chi chua tieu de nen bo qua).
             let a = titleEls[0];
             while (a) {
-              const cls = String(a.className || '');
-              if (a.getAttribute('role') === 'dialog' ||
-                  /modal|dialog|popup/i.test(cls)) { scope = a; break; }
+              const btns = [...a.querySelectorAll(
+                'button, a, [role="button"], input[type="button"], input[type="submit"]')].filter(isBtn);
+              if (btns.length) { scope = a; break; }
               a = a.parentElement;
-            }
-            if (scope === document) {
-              let b = titleEls[0].parentElement;
-              while (b) {
-                if (b.textContent.includes(label)) { scope = b; break; }
-                b = b.parentElement;
-              }
             }
           }
           const btns = [...scope.querySelectorAll(
-            'button, a, [role="button"]')].filter(
-            b => isVis(b) && b.textContent.trim() === label);
+            'button, a, [role="button"], input[type="button"], input[type="submit"]')].filter(isBtn);
           if (!btns.length) return false;
           btns[0].click();
           return true;
-        }""", label))
+        }""", label)
+        if ok:
+            return True
     except Exception:
-        return False
+        pass
+    # Cach 2: Playwright — nut co ten hien thi dung Yes/No.
+    try:
+        btn = page.get_by_role("button", name=label, exact=True).first
+        if btn.is_visible():
+            btn.click()
+            return True
+    except Exception:
+        pass
+    # Cach 3: Playwright — phan tu co chu dung Yes/No.
+    try:
+        el = page.get_by_text(label, exact=True).first
+        if el.is_visible():
+            el.click()
+            return True
+    except Exception:
+        pass
+    return False
 
 def _log_toggle_diagnosis(page, domain):
     """Khi khong xac dinh duoc trang thai toggle: ghi HTML that cua
