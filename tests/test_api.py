@@ -1126,7 +1126,7 @@ def main():
     dash.sheet_write_status = fake_write
     one41 = dash._sheet_setup_one("stylenora.com", 1407, "Web Chị Hân", cfg41, st41)
     assert one41["action"] == "done", one41
-    assert written == [(1407, "Đã setup")], written  # ghi dung dropdown cua user
+    assert written == [(1407, "Đã set up")], written  # ghi dung dropdown cua user
     z41b, _c = cf.get_or_create_zone("stylenora.com")
     assert any(x["type"] == "A" and x["content"] == "134.209.163.195"
                for x in cf.list_records(z41b["id"])), cf.list_records(z41b["id"])
@@ -1259,7 +1259,7 @@ def main():
     # Tu dong setup 1 luot: auto1 + auto2 xong, auto5 vao hang cho duyet (khong tu setup).
     ran43 = dash._sheet_auto_once(cfg43, st43)
     assert ran43 is True, ran43
-    assert (2, "Đã setup") in written43 and (3, "Đã setup") in written43, written43
+    assert (2, "Đã set up") in written43 and (3, "Đã set up") in written43, written43
     assert 6 not in [w[0] for w in written43], written43  # auto5 khong duoc setup
     assert any(q["domain"] == "auto5.com" for q in cfg43["sheet_review"]), cfg43["sheet_review"]
     last43 = dash.SHEET_AUTO_LAST
@@ -1289,7 +1289,7 @@ def main():
     one44 = dash._sheet_setup_one("retry44.com", 1500, "Web Chị Hân", cfg44, {})
     assert one44["action"] == "done", one44
     assert "retry44.com" not in cfg44["sheet_ignored"], cfg44["sheet_ignored"]
-    assert written44 == [(1500, "Đã setup")], written44
+    assert written44 == [(1500, "Đã set up")], written44
     dash.sheet_write_status = _real_write
     print("  OK", flush=True)
 

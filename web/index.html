@@ -36,6 +36,12 @@
   button.warn:hover { background: #931f18; }
   button:disabled { opacity: .5; cursor: wait; }
   button.small { padding: 6px 10px; font-size: 13px; }
+  /* Nut bat/tat (vd Tu dong setup): hien luon chu Bat / Tat de biet trang thai. */
+  button.toggle { min-width: 64px; padding: 6px 14px; border-radius: 999px; font-size: 13px; }
+  button.toggle.off { background: #e3ddd2; color: #4c463e; }
+  button.toggle.off:hover { background: #d8d0c2; }
+  button.toggle.on { background: #2e7d32; }
+  button.toggle.on:hover { background: #27692b; }
   /* Thanh cong cu cua bang Domains: nhom Tim/Them ben trai, Check + trang thai ben phai. */
   .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .tb-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
@@ -186,7 +192,7 @@
 
   <div class="card">
     <h2>Google Sheet — setup theo sheet</h2>
-    <p class="hint">Đọc sheet từ link CSV publish (cột <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành, <b>L</b> Ghi chú), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã setup"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt. Với preset <b>Web Anh Long</b>, nếu cột <b>L</b> có ghi ID thì setup kèm record TXT <b>_cf-custom-hostname</b> = ID đó (ghi bình thường, không dấu ngoặc kép); cột L trống thì setup bình thường. Sau này đổi ID ở cột L thì đọc lại sheet sẽ tự cập nhật TXT đó. Bấm <b>Setup lại</b> ở mục Bỏ qua thì thử lại tối đa 3 lần, hết 3 lần vẫn lỗi thì dừng và báo lỗi.</p>
+    <p class="hint">Đọc sheet từ link CSV publish (cột <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành, <b>L</b> Ghi chú), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã set up"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt. Với preset <b>Web Anh Long</b>, nếu cột <b>L</b> có ghi ID thì setup kèm record TXT <b>_cf-custom-hostname</b> = ID đó (ghi bình thường, không dấu ngoặc kép); cột L trống thì setup bình thường. Sau này đổi ID ở cột L thì đọc lại sheet sẽ tự cập nhật TXT đó. Bấm <b>Setup lại</b> ở mục Bỏ qua thì thử lại tối đa 3 lần, hết 3 lần vẫn lỗi thì dừng và báo lỗi.</p>
     <div class="row">
       <label style="flex:1">Link CSV publish <input type="text" id="sheetCsvUrl" style="width:100%" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?...&output=csv"></label>
     </div>
@@ -213,7 +219,7 @@
       <span class="muted" id="sheetMsg"></span>
     </div>
     <div class="row" style="margin-top:10px">
-      <label><input type="checkbox" id="sheetAuto" onchange="saveSheetAuto()"> <b>Tự động setup</b> — chỉ cần thêm domain vào sheet rồi đổi cột J thành "Cần setup" là tự chạy, không cần bấm nút (dashboard phải đang mở).</label>
+      <button id="sheetAutoBtn" class="toggle off" onclick="toggleSheetAuto()">Tắt</button> <b>Tự động setup</b> — chỉ cần thêm domain vào sheet rồi đổi cột J thành "Cần setup" là tự chạy, không cần bấm nút (dashboard phải đang mở).
       <label>mỗi <input type="number" id="sheetAutoInterval" style="width:60px" min="1" max="60" value="5" onchange="saveSheetAuto()"> phút</label>
       <span class="muted" id="sheetAutoMsg"></span>
     </div>
@@ -571,6 +577,19 @@ async function askPresetMismatch(domains, selected) {
 }
 // --- Google Sheet ---
 let SHEET_ROWS = [];
+let SHEET_AUTO_ON = false;  // trang thai nut Tu dong setup (hien chu Bat / Tat)
+function updateSheetAutoBtn() {
+  const b = document.getElementById('sheetAutoBtn');
+  if (!b) return;
+  b.textContent = SHEET_AUTO_ON ? 'Bật' : 'Tắt';
+  b.classList.toggle('on', SHEET_AUTO_ON);
+  b.classList.toggle('off', !SHEET_AUTO_ON);
+}
+async function toggleSheetAuto() {
+  SHEET_AUTO_ON = !SHEET_AUTO_ON;
+  updateSheetAutoBtn();
+  await saveSheetAuto();
+}
 let SHEET_FILTER = null;  // null = hien tat ca; 'setup'/'review'/'done'/'skip'/'error' = chi hien trang thai do
 function sheetRowState(r) {
   // Trang thai hien thi cua 1 dong sheet (dung chung cho dem + loc):
@@ -596,7 +615,8 @@ function renderSheetSettings() {
   document.getElementById('sheetStartRow').value = cfg.sheet_start_row || 1402;
   document.getElementById('sheetId').value = cfg.sheet_id || '';
   document.getElementById('sheetSaKey').value = cfg.sheet_sa_key || '';
-  document.getElementById('sheetAuto').checked = !!cfg.sheet_auto;
+  SHEET_AUTO_ON = !!cfg.sheet_auto;
+  updateSheetAutoBtn();
   document.getElementById('sheetAutoInterval').value = cfg.sheet_auto_interval || 5;
   const last = STATE.sheet_auto_last || {};
   document.getElementById('sheetAutoMsg').textContent = last.at
@@ -608,12 +628,12 @@ function renderSheetSettings() {
 }
 async function saveSheetAuto() {
   const res = await api('/api/sheet-settings', {
-    auto: document.getElementById('sheetAuto').checked,
+    auto: SHEET_AUTO_ON,
     interval: parseInt(document.getElementById('sheetAutoInterval').value, 10) || 5,
   });
   if (res.ok) await refresh();  // refresh() ve lai sheetAutoMsg -> dat message sau no
   document.getElementById('sheetAutoMsg').textContent = res.ok
-    ? (document.getElementById('sheetAuto').checked ? 'Đã bật tự động setup.' : 'Đã tắt tự động setup.')
+    ? (SHEET_AUTO_ON ? 'Đã bật tự động setup.' : 'Đã tắt tự động setup.')
     : ('Lỗi: ' + (res.error || ''));
 }
 async function saveSheetSettings() {
@@ -771,9 +791,16 @@ function renderSheetReview() {
   const q = cfg.sheet_review || [];
   const box = document.getElementById('sheetReview');
   if (!q.length) { box.innerHTML = '<p class="muted">Không có domain nào chờ duyệt.</p>'; return; }
-  box.innerHTML = q.map(x => `<div class="row"><span style="flex:1"><b>${esc(x.domain)}</b> (dòng ${x.row}) — đang dùng preset <b>${esc(x.current || '')}</b>, sheet muốn <b>${esc(x.preset)}</b> (${esc(x.loai || '')})</span><button class="small" onclick="acceptSheetReview('${esc(x.domain)}')">Chấp nhận — setup theo ${esc(x.preset)}</button><button class="warn small" onclick="rejectSheetReview('${esc(x.domain)}')">Từ chối</button></div>`).join('');
+  box.innerHTML = q.map(x => `<div class="row"><span style="flex:1"><b>${esc(x.domain)}</b> (dòng ${x.row}) — đang dùng preset <b>${esc(x.current || '')}</b>, sheet muốn <b>${esc(x.preset)}</b> (${esc(x.loai || '')})</span><button class="small" onclick="acceptSheetReview('${esc(x.domain)}', this)">Chấp nhận — setup theo ${esc(x.preset)}</button><button class="warn small" onclick="rejectSheetReview('${esc(x.domain)}')">Từ chối</button></div>`).join('');
 }
-async function acceptSheetReview(d) {
+async function acceptSheetReview(d, btn) {
+  // Khoa nut + doi chu ngay de biet la da bam (setup co the chay vai phut,
+  // khong thi bam xong nut van y nguyen, khong biet da duyet hay chua).
+  if (btn) {
+    const row = btn.closest('.row');
+    if (row) row.querySelectorAll('button').forEach(b => b.disabled = true);
+    btn.textContent = 'Đang setup…';
+  }
   const res = await api('/api/sheet-accept', { domain: d });
   log(res.result ? `${d}: ${res.result.detail}` : `${d}: lỗi — ${res.error || ''}`);
   await refresh();

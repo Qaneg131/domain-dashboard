@@ -706,13 +706,13 @@ def _sheet_norm_status(s):
     """Chuan hoa trang thai cot J: bo khoang trang/gach noi/gach duoi, lower.
     'Cần set up'/'Cần setup'/'Cần set-up' -> 'cầnsetup';
     'Đã set up'/'Đã setup'/'Đã set-up' -> 'đãsetup'.
-    (Sheet cua user dung ca 2 cach viet, dropdown hien 'Đã setup'.)"""
+    (Sheet cua user dung ca 2 cach viet, dropdown hien 'Đã set up'.)"""
     return (s or "").strip().lower().replace(" ", "").replace("-", "").replace("_", "")
 
 
 SHEET_WANT = ("cầnsetup", "đãsetup")
 SHEET_DONE = "đãsetup"  # gia tri ghi ve cot J khi setup xong (dung dropdown cua user)
-SHEET_DONE_DISPLAY = "Đã setup"
+SHEET_DONE_DISPLAY = "Đã set up"
 
 # TXT _cf-custom-hostname chi ap cho preset Web Anh Long (gia tri lay tu
 # cot L cua sheet). Web khac co cau hinh khac thi them sau.
@@ -972,7 +972,7 @@ def _sheet_classify(rows, cfg, st):
         r = dict(r)
         r["preset"] = _sheet_preset_for(r.get("loai"), cfg)
         if _sheet_norm_status(r["status_j"]) == SHEET_DONE:
-            r["action"], r["detail"] = "skip", "đã set up rồi"
+            r["action"], r["detail"] = "skip", "Đã set up rồi"
             # Da setup roi nhung cot L doi (chi Web Anh Long) -> cap nhat TXT.
             # Domain tung bi tu choi thi khong tu cap nhat (user bam Setup lai tay).
             note_l = (r.get("note_l") or "").strip()
