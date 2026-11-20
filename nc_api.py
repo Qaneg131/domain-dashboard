@@ -135,3 +135,34 @@ class NCClient:
         if el is None or el.get("Updated") != "true":
             raise NCError("setCustom khong tra ve Updated=true")
         return True
+
+    def set_auto_renew(self, domain, enabled):
+        """Bat/tat auto-renew cho 1 domain. Tra ve True neu ap dung duoc.
+
+        Dung lenh namecheap.domains.setAutoRenew — lenh nay khong co
+        trong bang method cong khai cua Namecheap nhung chay that
+        (da co nguoi kiem chung live): nhan DomainName (ten day du,
+        KHONG dung dang SLD/TLD — dang do bi tu choi) + IsAutoRenew
+        ("true"/"false"). Chu y: lenh tra ve co IsSuccess RIENG trong
+        envelope OK, phai doc flag nay chu khong chi tin Status=OK.
+        """
+        d = domain.strip().lower()
+        if "." not in d:
+            raise NCError(f"domain khong hop le: {domain}")
+        root = self._call("namecheap.domains.setAutoRenew",
+                          DomainName=d,
+                          IsAutoRenew="true" if enabled else "false")
+        # Tim element ket qua (ten theo quy uoc la DomainSetAutoRenewResult);
+        # phong khi ten khac thi tim bat ky element nao co 'AutoRenew'.
+        el = root.find(".//DomainSetAutoRenewResult")
+        if el is None:
+            for cand in root.iter():
+                if "AutoRenew" in cand.tag:
+                    el = cand
+                    break
+        if el is None:
+            raise NCError("setAutoRenew khong tra ve ket qua IsSuccess")
+        if el.get("IsSuccess") != "true":
+            raise NCError(
+                f"setAutoRenew tra ve IsSuccess={el.get('IsSuccess')}")
+        return True

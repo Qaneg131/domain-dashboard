@@ -191,6 +191,17 @@
   </div>
 
   <div class="card">
+    <h2>Auto-renew Namecheap</h2>
+    <p class="hint">Bật/tắt <b>tự động gia hạn</b> ở Namecheap cho nhiều domain 1 lần. Dán domain cần đổi (mỗi dòng 1 domain, nhập 10 domain hay hơn cũng được), bấm Bật hoặc Tắt — tool chạy <b>từng domain một</b>, xong 1 mới qua domain sau. Chỉ đổi đúng các domain trong ô này.</p>
+    <textarea id="autoRenewDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="example.com&#10;example.net"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button onclick="setAutoRenew(true)">Bật auto-renew</button>
+      <button class="secondary" onclick="setAutoRenew(false)">Tắt auto-renew</button>
+    </div>
+    <div id="autoRenewMsg" class="hint" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
     <h2>Google Sheet — setup theo sheet</h2>
     <p class="hint">Đọc sheet từ link CSV publish (cột <b>B</b> Tên Domain, <b>H</b> Loại web, <b>J</b> Đã hoàn thành, <b>L</b> Ghi chú), từ dòng bắt đầu trở xuống. Chỉ xử lý 2 trạng thái ở cột J: <b>"Cần set up"</b>/<b>"Cần setup"</b> (sẽ setup) và <b>"Đã set up"</b>/<b>"Đã setup"</b> (bỏ qua) — viết có hay không có khoảng trắng đều nhận. Setup xong thì ghi <b>"Đã set up"</b> vào cột J. Đi từng hàng, xong 1 (thành công hay lỗi) mới qua hàng sau; hàng nào xung đột preset thì đưa vào mục Chờ duyệt. Với preset <b>Web Anh Long</b>, nếu cột <b>L</b> có ghi ID thì setup kèm record TXT <b>_cf-custom-hostname</b> = ID đó (ghi bình thường, không dấu ngoặc kép); cột L trống thì setup bình thường. Sau này đổi ID ở cột L thì đọc lại sheet sẽ tự cập nhật TXT đó. Bấm <b>Setup lại</b> ở mục Bỏ qua thì thử lại tối đa 3 lần, hết 3 lần vẫn lỗi thì dừng và báo lỗi.</p>
     <div class="row">
@@ -952,6 +963,23 @@ async function addBatchToManaged() {
   await refresh();
   log(`Đã thêm ${domains.length} domain vào bảng quản lý.`);
   notify('Đã thêm domain vào bảng quản lý', `Đã thêm <b>${domains.length}</b> domain:${namesHtml(domains)}`);
+}
+
+// ---------------------------------------------------------------- auto-renew Namecheap
+async function setAutoRenew(enabled) {
+  const domains = [...new Set(document.getElementById('autoRenewDomains').value.split(/[\s,;]+/)
+    .map(s => s.trim().toLowerCase()).filter(s => s.includes('.')))];
+  if (!domains.length) { alert('Chưa nhập domain nào vào ô auto-renew.'); return; }
+  const action = enabled ? 'BẬT' : 'TẮT';
+  if (!confirm(`${action} auto-renew cho ${domains.length} domain:\n${domains.join('\n')}\n\nChạy từng domain một, mỗi domain mất vài giây.`)) return;
+  const msg = document.getElementById('autoRenewMsg');
+  msg.textContent = `Đang ${enabled ? 'bật' : 'tắt'} auto-renew cho ${domains.length} domain…`;
+  log(`Đang ${enabled ? 'bật' : 'tắt'} auto-renew cho ${domains.length} domain…`);
+  const res = await api('/api/autorenew', { domains, enabled });
+  const lines = (res.results || []).map(r => `${r.ok ? '✓' : '✗'} ${r.domain}: ${r.detail}`);
+  log(lines.join('\n'));
+  msg.textContent = lines.join('  •  ');
+  notifyResults(`${action} auto-renew xong`, res.results || []);
 }
 
 // ---------------------------------------------------------------- account tab

@@ -173,6 +173,27 @@ class MockHandler(BaseHTTPRequestHandler):
                        f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
                        f'<DomainDNSSetCustomResult Domain="{dom}" Updated="true" />'
                        f'</CommandResponse></ApiResponse>')
+            elif cmd == "namecheap.domains.setAutoRenew":
+                # Nhan DomainName (ten day du) + IsAutoRenew; tra ve
+                # IsSuccess RIENG trong envelope OK. Domain failar.com
+                # gia lap IsSuccess=false de test loi.
+                STATE["nc_calls"] += 1
+                dname = q.get("DomainName", [""])[0].strip().lower()
+                if not dname or "." not in dname:
+                    xml = (f'<?xml version="1.0"?><ApiResponse Status="ERROR"{NS}><Errors>'
+                           '<Error Number="101">DomainName is required</Error>'
+                           '</Errors></ApiResponse>')
+                else:
+                    ok = "false" if dname == "failar.com" else "true"
+                    if ok == "true":
+                        # Chi ghi trang thai khi IsSuccess=true; doc gia
+                        # tri IsAutoRenew that client gui (true/false).
+                        ar_val = q.get("IsAutoRenew", ["true"])[0].lower() == "true"
+                        STATE.setdefault("nc_autorenew", {})[dname] = ar_val
+                    xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
+                           f'<RequestedCommand>{cmd}</RequestedCommand><CommandResponse>'
+                           f'<DomainSetAutoRenewResult Domain="{dname}" IsSuccess="{ok}" />'
+                           f'</CommandResponse></ApiResponse>')
             else:
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="ERROR"{NS}><Errors>'
                        '<Error Number="101">unknown command</Error></Errors></ApiResponse>')
@@ -1393,6 +1414,26 @@ def main():
     assert ok45["action"] == "done" and calls["n"] == 2, (ok45, calls)
     dash.setup_domain = _real_setup
     dash.sheet_write_status = _real_write
+    print("  OK", flush=True)
+
+    print("TEST 46: set_auto_renew — bat/tat auto-renew Namecheap (DomainName + IsAutoRenew)...", flush=True)
+    nc46 = NCClient("testuser", "test-key", "1.2.3.4", base=base + "/xml.response")
+    assert nc46.set_auto_renew("ar1.com", True) is True
+    assert STATE["nc_autorenew"]["ar1.com"] is True, STATE["nc_autorenew"]
+    assert nc46.set_auto_renew("ar2.com", False) is True
+    assert STATE["nc_autorenew"]["ar2.com"] is False, STATE["nc_autorenew"]
+    # IsSuccess=false -> bao loi (khong tin envelope OK).
+    try:
+        nc46.set_auto_renew("failar.com", True)
+        raise AssertionError("failar.com phai bao loi IsSuccess=false")
+    except Exception as e:
+        assert "IsSuccess" in str(e), e
+    # Domain khong hop le -> bao loi.
+    try:
+        nc46.set_auto_renew("notadomain", True)
+        raise AssertionError("domain khong co dau cham phai bao loi")
+    except Exception as e:
+        assert "khong hop le" in str(e), e
     print("  OK", flush=True)
 
     srv.shutdown()

@@ -1576,6 +1576,42 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.5)
                 save_status(st)
                 self._json({"ok": True, "results": results})
+            elif path == "/api/autorenew":
+                # Bat/tat auto-renew Namecheap cho nhieu domain 1 lan:
+                # nhap danh sach (moi dong 1 domain), chay tuan tu tung
+                # cai. Dung ngay khi gap gioi han toc do Namecheap.
+                if not _nc_configured(cfg):
+                    self._json({"ok": False, "error":
+                                "chua nhap du Namecheap API (user/key/IP) "
+                                "o muc Cai dat"}, 400)
+                    return
+                domains = []
+                for x in (body.get("domains") or []):
+                    x = str(x).strip().lower()
+                    if x and x not in domains:
+                        domains.append(x)
+                enabled = bool(body.get("enabled"))
+                nc = _nc_client(cfg)
+                results = []
+                for d in domains:
+                    try:
+                        nc.set_auto_renew(d, enabled)
+                        results.append({"domain": d, "ok": True,
+                                        "detail": "da bat auto-renew"
+                                        if enabled else "da tat auto-renew"})
+                    except Exception as e:
+                        detail = str(e)
+                        results.append({"domain": d, "ok": False,
+                                        "detail": detail})
+                        if _is_rate_limit_msg(detail):
+                            results.append({"domain": "(con lai)",
+                                            "ok": False,
+                                            "detail": "Namecheap gioi han "
+                                            "toc do — doi ~2 phut roi chay "
+                                            "tiep cac domain con lai"})
+                            break
+                    time.sleep(0.5)
+                self._json({"ok": True, "results": results})
             elif path == "/api/sync-ns":
                 d = str(body.get("domain", "")).strip().lower()
                 cf, zone, err = _get_zone_or_error(d, cfg)

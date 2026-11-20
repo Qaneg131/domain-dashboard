@@ -286,6 +286,18 @@ def main():
     st3 = call("GET", "/api/state")
     assert st3["status"]["lightcheck.com"]["light"], st3["status"]
     print("CHECK-DNS NHANH OK: chi DNS, khong goi Namecheap, khong ghi de trang thai day du", flush=True)
+
+    # Auto-renew Namecheap: bat/tat cho danh sach domain, chay tuan tu.
+    ar = call("POST", "/api/autorenew", {"domains": ["ar1.com", "ar2.com"], "enabled": True})
+    assert ar["ok"], ar
+    by_ar = {r["domain"]: r for r in ar["results"]}
+    assert by_ar["ar1.com"]["ok"] and by_ar["ar2.com"]["ok"], by_ar
+    assert STATE["nc_autorenew"]["ar1.com"] is True and STATE["nc_autorenew"]["ar2.com"] is True, STATE["nc_autorenew"]
+    ar_off = call("POST", "/api/autorenew", {"domains": ["ar1.com"], "enabled": False})
+    assert ar_off["results"][0]["ok"] and STATE["nc_autorenew"]["ar1.com"] is False, ar_off
+    ar_fail = call("POST", "/api/autorenew", {"domains": ["failar.com"], "enabled": True})
+    assert ar_fail["results"][0]["ok"] is False, ar_fail
+    print("AUTO-RENEW OK: bat/tat theo danh sach, IsSuccess=false thi bao loi", flush=True)
     mock.shutdown()
     print("E2E OK")
 
