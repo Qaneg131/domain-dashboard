@@ -87,6 +87,10 @@ DEFAULT_CONFIG = {
     # ten thu muc ho so da chon o tab Auto-renew (vd 'Default', 'Profile 1').
     "chrome_profile_dir": "",
     "chrome_profile": "",
+    # Sheet Tinh trang Sus rieng (KHAC sheet set domain cu): link CSV
+    # xuat ban, chi doc de hien o tab Auto-renew. Cot B = WEB (domain),
+    # cot F = Tinh Trang Sus. De trong = khong hien tinh trang Sus.
+    "sus_sheet_csv_url": "",
 }
 
 

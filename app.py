@@ -158,6 +158,65 @@ def _read_newest_ar_report(before):
         return []
 
 
+# ------------------------------------------------------------------ tinh trang Sus
+# Sheet rieng ve tinh trang Sus cua domain (KHAC sheet set domain cu):
+# cot B = WEB (ten domain), cot F = Tinh Trang Sus ("Da Sus" / "Xanh" /
+# "Sus mail" / trong). Chi DOC de hien o tab Auto-renew, khong ghi gi
+# vao sheet, khong doi gi tren domain. Doc qua link CSV xuat ban
+# (Google cache ~5 phut) nen co cache trong bo nho 5 phut.
+SUS_CACHE = {"at": 0.0, "url": "", "sus": {}, "error": ""}
+SUS_CACHE_TTL_S = 300
+
+
+def _sus_csv_url(raw):
+    """Chuan hoa link sheet xuat ban thanh link CSV: pubhtml -> pub +
+    output=csv; link pub chua co output thi them output=csv. Link
+    khong phai Google Sheets thi giu nguyen."""
+    u = str(raw or "").strip()
+    if not u or "docs.google.com" not in u:
+        return u
+    u = u.replace("/pubhtml", "/pub")
+    if "output=csv" in u:
+        return u
+    sep = "&" if "?" in u else "?"
+    return u + sep + "output=csv"
+
+
+def _fetch_sus_map(cfg):
+    """Doc sheet Sus -> {domain_lower: {status, date, days}}: status =
+    cot F (Tinh Trang Sus), date = cot C (Ngay ve GMC, DD/MM/YYYY),
+    days = cot H (So ngay GMC). Domain trung nhau thi lay DONG CUOI
+    (giong sheet set domain). Tra ve (sus_map, error). Cache 5 phut
+    theo URL."""
+    url = _sus_csv_url(cfg.get("sus_sheet_csv_url") or "")
+    if not url:
+        return {}, "chua nhap link sheet Tinh trang Sus (o tab Auto-renew)"
+    now = time.time()
+    if SUS_CACHE["url"] == url and now - SUS_CACHE["at"] < SUS_CACHE_TTL_S:
+        return dict(SUS_CACHE["sus"]), SUS_CACHE["error"]
+    sus, err = {}, ""
+    try:
+        import io
+        req = urllib.request.Request(url, headers={"User-Agent": "domain-dashboard"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            text = r.read().decode("utf-8-sig", errors="replace")
+        rows = list(csv.reader(io.StringIO(text)))
+        for row in rows[1:]:  # bo header
+            if len(row) < 6:
+                continue
+            d = (row[1] or "").strip().lower()
+            if not d or "." not in d:
+                continue
+            sus[d] = {"status": (row[5] or "").strip(),
+                      "date": (row[2] or "").strip(),
+                      "days": (row[7] or "").strip() if len(row) > 7 else ""}
+    except Exception as e:
+        err = "khong doc duoc sheet Sus: " + str(e)[:150]
+        sus = {}
+    SUS_CACHE.update({"at": now, "url": url, "sus": dict(sus), "error": err})
+    return sus, err
+
+
 def _records_match(records, preset, domain):
     """Record hien co co khop preset khong (so theo type + ten day du + content)."""
     want = {(r["type"].upper(), expand_name(domain, r.get("name", "")).lower(),
@@ -1446,6 +1505,15 @@ class Handler(BaseHTTPRequestHandler):
                         "last_used": last_used,
                         "profile_dir": str(_chrome_profile_dir(cfg))})
             return
+        if path == "/api/sus-status":
+            # Tinh trang Sus cua domain (doc tu sheet Sus rieng, chi
+            # doc de hien o tab Auto-renew). Tra ve {domain: {status,
+            # date (Ngay ve, cot C), days (So ngay, cot H)}}.
+            cfg = load_config()
+            sus, err = _fetch_sus_map(cfg)
+            self._json({"ok": not err, "sus": sus, "count": len(sus),
+                        "error": err})
+            return
         if path == "/api/expiry":
             # Ngay het han cua cac domain o Namecheap (de hien cot Han +
             # loc domain sap het han). Chi doc getList, khong doi gi
@@ -1472,7 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/settings":
                 for k in ("cf_token", "cf_account_id", "nc_user", "nc_api_key", "nc_client_ip",
-                          "setup_tool_dir"):
+                          "chrome_profile_dir", "chrome_profile", "sus_sheet_csv_url"):
                     if k in body:
                         cfg[k] = str(body[k]).strip()
                 save_config(cfg)

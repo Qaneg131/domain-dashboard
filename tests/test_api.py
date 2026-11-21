@@ -1461,6 +1461,59 @@ def main():
     print("  OK", flush=True)
 
     srv.shutdown()
+    print("TEST 48: sheet Sus — chuan hoa link pubhtml -> CSV + doc map domain -> tinh trang (lay dong cuoi khi trung)...", flush=True)
+    import app as dash_app
+    base48 = "https://docs.google.com/spreadsheets/d/e/2PACX-FAKE/pubhtml?gid=1&single=true"
+    assert dash_app._sus_csv_url(base48) == \
+        "https://docs.google.com/spreadsheets/d/e/2PACX-FAKE/pub?gid=1&single=true&output=csv"
+    assert dash_app._sus_csv_url(base48.replace("pubhtml", "pub")) == \
+        "https://docs.google.com/spreadsheets/d/e/2PACX-FAKE/pub?gid=1&single=true&output=csv"
+    assert dash_app._sus_csv_url(base48 + "&output=csv").endswith("output=csv") and \
+        dash_app._sus_csv_url(base48 + "&output=csv").count("output=csv") == 1
+    assert dash_app._sus_csv_url("") == ""
+    assert dash_app._sus_csv_url("file:///tmp/x.csv") == "file:///tmp/x.csv"
+    # Doc CSV gia qua monkeypatch urlopen.
+    fake_csv = (",WEB,Ngay ve GMC,Bao cao,Loai web,Tinh Trang Sus,REG,So ngay GMC\n"
+                ",testa.com,20/12/2025,,Shopify,Đã Sus,An,336\n"
+                ",testb.com,02/01/2026,,Shopify,Xanh,An,323\n"
+                ",testc.com,05/01/2026,,Shopify,Sus mail,An,320\n"
+                ",testa.com,06/01/2026,,Shopify,Xanh,An,280\n"  # trung: lay dong cuoi
+                ",,07/01/2026,,Shopify,Đã Sus,An,279\n"          # khong co domain: bo
+                ",khong-phai-domain,08/01/2026,,Shopify,Đã Sus,An,278\n")  # khong co dau cham: bo
+    import urllib.request as _urlreq
+
+    class _FakeResp:
+        def __init__(self, text):
+            self._b = text.encode("utf-8")
+        def read(self):
+            return self._b
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    real_open = _urlreq.urlopen
+    _urlreq.urlopen = lambda req, timeout=20: _FakeResp(fake_csv)
+    try:
+        dash_app.SUS_CACHE.update({"at": 0.0, "url": "", "sus": {}, "error": ""})
+        sus48, err48 = dash_app._fetch_sus_map({"sus_sheet_csv_url": base48})
+        assert not err48, err48
+        assert sus48 == {
+            "testa.com": {"status": "Xanh", "date": "06/01/2026", "days": "280"},
+            "testb.com": {"status": "Xanh", "date": "02/01/2026", "days": "323"},
+            "testc.com": {"status": "Sus mail", "date": "05/01/2026", "days": "320"},
+        }, sus48
+        # Chua nhap link thi bao loi ro.
+        sus48b, err48b = dash_app._fetch_sus_map({"sus_sheet_csv_url": ""})
+        assert sus48b == {} and "chua nhap link" in err48b, (sus48b, err48b)
+        # Cache: doi urlopen thanh loi thi van tra map cu trong 5 phut.
+        _urlreq.urlopen = lambda req, timeout=20: (_ for _ in ()).throw(RuntimeError("mang loi"))
+        sus48c, err48c = dash_app._fetch_sus_map({"sus_sheet_csv_url": base48})
+        assert sus48c == sus48 and not err48c, (sus48c, err48c)
+    finally:
+        _urlreq.urlopen = real_open
+        dash_app.SUS_CACHE.update({"at": 0.0, "url": "", "sus": {}, "error": ""})
+    print("  OK", flush=True)
     print("ALL TESTS PASSED")
 
 

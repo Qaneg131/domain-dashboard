@@ -355,6 +355,25 @@ def main():
     # co Chrome that nen danh sach rong, nhung phai co cac khoa).
     profs = call("GET", "/api/chrome-profiles")
     assert profs["ok"] and "profiles" in profs and "last_used" in profs, profs
+    # Tinh trang Sus: doc tu file CSV gia (file://) qua endpoint.
+    sus_csv = os.path.join(fake_dir, "sus.csv")
+    with open(sus_csv, "w", encoding="utf-8") as f:
+        f.write(",WEB,Ngay ve,Bao cao,Loai web,Tinh Trang Sus,REG,So ngay\n"
+                ",susa.com,20/12/2025,,Shopify,Đã Sus,An,336\n"
+                ",susb.com,02/01/2026,,Shopify,Xanh,An,323\n"
+                ",susc.com,05/01/2026,,Shopify,Sus mail,An,320\n")
+    call("POST", "/api/settings", {"sus_sheet_csv_url": "file://" + sus_csv})
+    sus = call("GET", "/api/sus-status")
+    assert sus["ok"] and sus["count"] == 3, sus
+    assert sus["sus"] == {
+        "susa.com": {"status": "Đã Sus", "date": "20/12/2025", "days": "336"},
+        "susb.com": {"status": "Xanh", "date": "02/01/2026", "days": "323"},
+        "susc.com": {"status": "Sus mail", "date": "05/01/2026", "days": "320"},
+    }, sus
+    call("POST", "/api/settings", {"sus_sheet_csv_url": ""})
+    sus2 = call("GET", "/api/sus-status")
+    assert not sus2["ok"] and "chua nhap link" in sus2.get("error", ""), sus2
+    print("SUS-STATUS OK: doc CSV sheet Sus qua endpoint + bao loi khi chua nhap link", flush=True)
     print("AUTORENEW-BROWSER OK: prepare + chay fake script + doc CSV + chon profile + bao loi khi khong co domain + liet ke ho so", flush=True)
     mock.shutdown()
     print("E2E OK")
