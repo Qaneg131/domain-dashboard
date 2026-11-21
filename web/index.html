@@ -305,8 +305,7 @@
   <div id="viewAr" style="display:none">
   <div class="card">
     <h2>Auto-renew (bằng Chrome) — bật tự động gia hạn trên Namecheap</h2>
-    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: dán list domain, chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain trong ô này.</p>
-    <textarea id="arDomains" rows="4" style="width:100%; padding:8px; border:1px solid #cfc8ba; border-radius:4px; font-size:14px;" placeholder="example.com&#10;example.net"></textarea>
+    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: tick chọn domain trong bảng dưới (đổi trang hay tìm domain mới vẫn giữ nguyên các domain đã chọn, chọn thêm được), chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain đã chọn.</p>
     <div class="row" style="margin-top:8px">
       <label>Link sheet Tình trạng Sus</label>
       <input type="text" id="susSheetUrl" placeholder="dán link CSV xuất bản của sheet Sus (chỉ đọc để hiện trạng thái)">
@@ -314,21 +313,12 @@
       <button onclick="loadSusStatus(true)">Tải lại</button>
       <span class="muted" id="susMsg"></span>
     </div>
-    <div class="row" style="margin-top:8px">
-      <label>Tìm domain</label>
-      <input type="text" id="susSearch" placeholder="lọc theo tên domain…">
-      <label>Tình trạng</label>
-      <select id="susFilter">
-        <option value="all">Tất cả</option>
-        <option value="sus">Đã Sus</option>
-        <option value="mail">Sus mail</option>
-        <option value="xanh">Xanh</option>
-        <option value="ngoai">Không có trong sheet</option>
-      </select>
-    </div>
-    <div id="susPreview" style="margin-top:8px"></div>
     <div style="margin-top:16px">
       <h3 style="margin:0 0 8px">Tất cả domain trong sheet Sus</h3>
+      <div class="row" style="margin-top:8px">
+        <span>Đã chọn <b id="susSelCount">0</b> domain</span>
+        <button onclick="clearSusSelected()">Bỏ chọn tất cả</button>
+      </div>
       <div class="row" style="margin-top:8px">
         <label>Tìm domain</label>
         <input type="text" id="susAllSearch" placeholder="lọc theo tên domain…">
@@ -356,7 +346,7 @@
     </div>
     <div class="row" style="margin-top:8px">
       <button onclick="openArNamecheap()">1. Mở Namecheap</button>
-      <button onclick="runArBrowser()">2. Bắt đầu bật auto-renew</button>
+      <button onclick="runArBrowser()">2. Bật auto-renew cho domain đã chọn</button>
       <span class="muted" id="arMsg"></span>
     </div>
   </div>
@@ -1052,10 +1042,6 @@ async function addBatchToManaged() {
 // ---------------------------------------------------------------- auto-renew
 // Bat auto-renew bang Chrome (API khong lam duoc): Dashboard goi sang
 // chrome_autorenew.py nam ngay trong thu muc Dashboard.
-function arDomainList() {
-  return [...new Set(document.getElementById('arDomains').value.split(/[\s,;]+/)
-    .map(s => s.trim().toLowerCase()).filter(s => s && s.includes('.')))];
-}
 async function loadArProfiles() {
   const sel = document.getElementById('arProfile');
   const saved = (STATE.config || {}).chrome_profile || '';
@@ -1079,11 +1065,13 @@ async function loadArProfiles() {
 let SUS_MAP = {};
 let SUS_LOADED = false;
 let SUS_TIMER = null;
-let SUS_PAGE = 1;
 let SUS_ALL_PAGE = 1;
+// Domain da tick chon trong bang day du — luu trong Set (khong phu
+// thuoc DOM) nen doi trang hay tim/loc domain moi van giu nguyen,
+// chon them duoc (giong bang Quan ly domain).
+const SUS_SELECTED = new Set();
 const SUS_PER_PAGE = 15;
-let SUS_SORT_DIR = 1;  // 1 = Ngay ve tang dan (ngay gan nhat truoc)
-let SUS_ALL_SORT_DIR = 1;
+let SUS_ALL_SORT_DIR = 1;  // 1 = Ngay ve tang dan (ngay gan nhat truoc)
 function parseSusDate(s) {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || '').trim());
   if (!m) return null;
@@ -1112,13 +1100,47 @@ function sortSusRows(rows, dir) {
   });
 }
 function susRowsHtml(pageRows, sortDir, sortFn) {
-  const body = pageRows.map(r =>
-    `<tr><td class="mono">${esc(r.d)}</td><td>${susBadge(r.st, !!r.info)}</td>` +
-    `<td>${r.info && r.info.date ? esc(r.info.date) : '<span class="muted">—</span>'}</td>` +
-    `<td>${r.info && r.info.days ? esc(r.info.days) : '<span class="muted">—</span>'}</td></tr>`).join('');
+  const allChecked = pageRows.length > 0 && pageRows.every(r => SUS_SELECTED.has(r.d));
+  const body = pageRows.map(r => {
+    const checked = SUS_SELECTED.has(r.d) ? 'checked' : '';
+    return `<tr><td><input type="checkbox" class="sus-check" data-d="${esc(r.d)}" ${checked} onchange="toggleSusSelect(this)"></td>` +
+      `<td class="mono">${esc(r.d)}</td><td>${susBadge(r.st, !!r.info)}</td>` +
+      `<td>${r.info && r.info.date ? esc(r.info.date) : '<span class="muted">—</span>'}</td>` +
+      `<td>${r.info && r.info.days ? esc(r.info.days) : '<span class="muted">—</span>'}</td></tr>`;
+  }).join('');
   const arrow = sortDir === 1 ? '▲' : '▼';
-  return `<table class="tbl" style="width:100%"><thead><tr><th>Domain</th><th>Tình trạng Sus</th>` +
-    `<th><a href="javascript:void(0)" onclick="${sortFn}()" style="color:inherit">Ngày về ${arrow}</a></th><th>Số ngày</th></tr></thead><tbody>${body || '<tr><td colspan="4" class="muted">Không có domain nào khớp bộ lọc.</td></tr>'}</tbody></table>`;
+  return `<table class="tbl" style="width:100%"><thead><tr><th><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSusSelectAll(this)" title="Chọn hết trang này"></th><th>Domain</th><th>Tình trạng Sus</th>` +
+    `<th><a href="javascript:void(0)" onclick="${sortFn}()" style="color:inherit">Ngày về ${arrow}</a></th><th>Số ngày</th></tr></thead><tbody>${body || '<tr><td colspan="5" class="muted">Không có domain nào khớp bộ lọc.</td></tr>'}</tbody></table>`;
+}
+function updateSusSelCount() {
+  const el = document.getElementById('susSelCount');
+  if (el) el.textContent = SUS_SELECTED.size;
+}
+function toggleSusSelect(cb) {
+  const d = cb.getAttribute('data-d');
+  if (cb.checked) SUS_SELECTED.add(d); else SUS_SELECTED.delete(d);
+  updateSusSelCount();
+  const tbl = cb.closest('table');
+  if (tbl) {
+    const headCb = tbl.querySelector('thead input[type="checkbox"]');
+    const rowCbs = [...tbl.querySelectorAll('tbody input.sus-check')];
+    if (headCb && rowCbs.length) headCb.checked = rowCbs.every(c => c.checked);
+  }
+}
+function toggleSusSelectAll(cb) {
+  const tbl = cb.closest('table');
+  if (!tbl) return;
+  [...tbl.querySelectorAll('tbody input.sus-check')].forEach(c => {
+    c.checked = cb.checked;
+    const d = c.getAttribute('data-d');
+    if (cb.checked) SUS_SELECTED.add(d); else SUS_SELECTED.delete(d);
+  });
+  updateSusSelCount();
+}
+function clearSusSelected() {
+  SUS_SELECTED.clear();
+  updateSusSelCount();
+  renderSusAll();
 }
 function susPagerHtml(page, totalPages, total, pageFn) {
   return `<div class="row" style="margin-top:6px"><button onclick="${pageFn}(${page - 1})" ${page <= 1 ? 'disabled' : ''}>‹ Trước</button>` +
@@ -1139,9 +1161,6 @@ async function loadSusStatus(force) {
   const urlInput = document.getElementById('susSheetUrl');
   if (!urlInput.value) urlInput.value = (STATE.config || {}).sus_sheet_csv_url || '';
   if (!urlInput.value.trim()) {
-    document.getElementById('susPreview').innerHTML =
-      '<span class="muted">Chưa nhập link sheet Tình trạng Sus — dán link CSV xuất bản vào ô trên rồi bấm Lưu link để hiện trạng thái từng domain.</span>';
-    renderSusPreview();
     renderSusAll();
     return;
   }
@@ -1156,43 +1175,8 @@ async function loadSusStatus(force) {
   } catch (e) {
     if (msg) msg.textContent = 'Không tải được sheet Sus.';
   }
-  renderSusPreview();
   renderSusAll();
 }
-function renderSusPreview() {
-  const box = document.getElementById('susPreview');
-  const domains = arDomainList();
-  if (!domains.length) {
-    if (SUS_LOADED) box.innerHTML = '<span class="muted">Dán list domain vào ô trên để xem tình trạng Sus từng domain.</span>';
-    return;
-  }
-  const counts = { sus: 0, mail: 0, xanh: 0, khac: 0, ngoai: 0 };
-  const rows = domains.map(d => {
-    const r = susRowObj(d, SUS_MAP[d] || null);
-    counts[r.cat]++;
-    return r;
-  });
-  // Bo loc: tim theo ten domain + loc theo tinh trang.
-  const q = (document.getElementById('susSearch').value || '').trim().toLowerCase();
-  const f = document.getElementById('susFilter').value;
-  const filtered = rows.filter(r =>
-    (f === 'all' || r.cat === f) && (!q || r.d.includes(q)));
-  sortSusRows(filtered, SUS_SORT_DIR);
-  // Phan trang 15 domain/trang.
-  const totalPages = Math.max(1, Math.ceil(filtered.length / SUS_PER_PAGE));
-  if (SUS_PAGE > totalPages) SUS_PAGE = totalPages;
-  const pageRows = filtered.slice((SUS_PAGE - 1) * SUS_PER_PAGE, SUS_PAGE * SUS_PER_PAGE);
-  box.innerHTML = `<div style="margin-bottom:4px"><b>Tình trạng Sus:</b> ` +
-    `<span class="badge no">Đã Sus: ${counts.sus}</span> ` +
-    `<span class="badge wait">Sus mail: ${counts.mail}</span> ` +
-    `<span class="badge ok">Xanh: ${counts.xanh}</span> ` +
-    `<span class="muted">không có trong sheet: ${counts.ngoai}${counts.khac ? `, khác: ${counts.khac}` : ''}</span></div>` +
-    (filtered.length !== rows.length ? `<div class="muted" style="margin-bottom:4px">Đang lọc: ${filtered.length}/${rows.length} domain.</div>` : '') +
-    susRowsHtml(pageRows, SUS_SORT_DIR, 'toggleSusSort') +
-    susPagerHtml(SUS_PAGE, totalPages, filtered.length, 'setSusPage');
-}
-function toggleSusSort() { SUS_SORT_DIR *= -1; renderSusPreview(); }
-function setSusPage(n) { SUS_PAGE = Math.max(1, n); renderSusPreview(); }
 // Bang day du: tat ca domain trong sheet Sus (khong chi domain da dan).
 function renderSusAll() {
   const box = document.getElementById('susAllPreview');
@@ -1213,6 +1197,7 @@ function renderSusAll() {
     (filtered.length !== rows.length ? ` — đang lọc: ${filtered.length} domain.` : '.') + `</div>` +
     susRowsHtml(pageRows, SUS_ALL_SORT_DIR, 'toggleSusAllSort') +
     susPagerHtml(SUS_ALL_PAGE, totalPages, filtered.length, 'setSusAllPage');
+  updateSusSelCount();
 }
 function toggleSusAllSort() { SUS_ALL_SORT_DIR *= -1; renderSusAll(); }
 function setSusAllPage(n) { SUS_ALL_PAGE = Math.max(1, n); renderSusAll(); }
@@ -1237,8 +1222,8 @@ async function openArNamecheap() {
   }
 }
 async function runArBrowser() {
-  const domains = arDomainList();
-  if (!domains.length) { alert('Chưa nhập domain nào vào ô auto-renew.'); return; }
+  const domains = [...SUS_SELECTED];
+  if (!domains.length) { alert('Chưa chọn domain nào — tick chọn domain trong bảng dưới rồi bấm lại.'); return; }
   const privacy = document.getElementById('arPrivacy').value;
   const profile = document.getElementById('arProfile').value;
   await api('/api/settings', { chrome_profile: profile });
@@ -2057,20 +2042,6 @@ refresh().then(() => {
   setInterval(() => {
     if (STATE.config && STATE.config.sheet_auto && STATE.config.sheet_csv_url) readSheet(true);
   }, 60000);
-  // Paste/sua list domain o tab Auto-renew thi cap nhat bang Tinh trang Sus.
-  const arBox = document.getElementById('arDomains');
-  if (arBox) arBox.addEventListener('input', () => {
-    clearTimeout(SUS_TIMER);
-    SUS_TIMER = setTimeout(() => { SUS_PAGE = 1; renderSusPreview(); }, 400);
-  });
-  // Bo loc bang Tinh trang Sus: tim theo ten + loc theo trang thai.
-  const susSearch = document.getElementById('susSearch');
-  if (susSearch) susSearch.addEventListener('input', () => {
-    clearTimeout(SUS_TIMER);
-    SUS_TIMER = setTimeout(() => { SUS_PAGE = 1; renderSusPreview(); }, 400);
-  });
-  const susFilter = document.getElementById('susFilter');
-  if (susFilter) susFilter.addEventListener('change', () => { SUS_PAGE = 1; renderSusPreview(); });
   // Bo loc bang day du (tat ca domain trong sheet Sus).
   const susAllSearch = document.getElementById('susAllSearch');
   if (susAllSearch) susAllSearch.addEventListener('input', () => {
