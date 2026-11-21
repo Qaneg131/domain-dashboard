@@ -217,6 +217,32 @@ def _fetch_sus_map(cfg):
     return sus, err
 
 
+# ------------------------------------------------- getList Namecheap
+# Han + co AutoRenew that tren web Namecheap (doc qua getList, chi
+# doc). Cache 5 phut de khong goi Namecheap lien tuc khi doi trang/loc
+# (1 lan doc getList phuc vu ca cot Han va cot Auto-renew).
+NC_LIST_CACHE = {"at": 0.0, "info": {}, "error": ""}
+NC_LIST_CACHE_TTL_S = 300
+
+
+def _fetch_nc_list_info(cfg, force=False):
+    """Thong tin getList cua tat ca domain trong tai khoan Namecheap ->
+    {domain_lower: {"expiry": "YYYY-MM-DD"|None, "autorenew": bool}}.
+    Tra ve (info, error)."""
+    now = time.time()
+    if not force and now - NC_LIST_CACHE["at"] < NC_LIST_CACHE_TTL_S:
+        return dict(NC_LIST_CACHE["info"]), NC_LIST_CACHE["error"]
+    info, err = {}, ""
+    try:
+        info = {d["name"]: {"expiry": d["expiry"], "autorenew": d["autorenew"]}
+                for d in _nc_client(cfg)._get_list_domains()}
+    except Exception as e:
+        err = "khong doc duoc danh sach domain Namecheap: " + str(e)[:150]
+        info = {}
+    NC_LIST_CACHE.update({"at": now, "info": dict(info), "error": err})
+    return info, err
+
+
 def _records_match(records, preset, domain):
     """Record hien co co khop preset khong (so theo type + ten day du + content)."""
     want = {(r["type"].upper(), expand_name(domain, r.get("name", "")).lower(),
@@ -1505,6 +1531,29 @@ class Handler(BaseHTTPRequestHandler):
                         "last_used": last_used,
                         "profile_dir": str(_chrome_profile_dir(cfg))})
             return
+        if path == "/api/autorenew-status":
+            # Trang thai auto-renew that tren web Namecheap (co AutoRenew
+            # cua getList) + ngay het han. Chi doc, khong doi gi. Tra ve
+            # {domain: true/false} va {domain: "YYYY-MM-DD"}.
+            # ?force=1 de tai lai bo qua cache. Dung chung cache getList
+            # voi /api/expiry (1 lan doc phuc vu ca 2 cot).
+            cfg = load_config()
+            if not _nc_configured(cfg):
+                self._json({"error": "chua nhap du Namecheap API "
+                                     "(user/key/IP) o muc Cai dat"}, 400)
+                return
+            try:
+                force = urllib.parse.parse_qs(p.query).get("force", [""])[0] == "1"
+                info, err = _fetch_nc_list_info(cfg, force=force)
+                self._json({"ok": not err,
+                            "autorenew": {d: v["autorenew"] for d, v in info.items()},
+                            "expiry": {d: v["expiry"] for d, v in info.items()
+                                       if v["expiry"]},
+                            "count": len(info), "error": err})
+            except Exception as e:
+                self._json({"ok": False, "autorenew": {}, "expiry": {},
+                            "count": 0, "error": str(e)[:200]})
+            return
         if path == "/api/sus-status":
             # Tinh trang Sus cua domain (doc tu sheet Sus rieng, chi
             # doc de hien o tab Auto-renew). Tra ve {domain: {status,
@@ -1517,15 +1566,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/expiry":
             # Ngay het han cua cac domain o Namecheap (de hien cot Han +
             # loc domain sap het han). Chi doc getList, khong doi gi
-            # tren Namecheap.
+            # tren Namecheap. Dung chung cache getList voi
+            # /api/autorenew-status.
             cfg = load_config()
             if not _nc_configured(cfg):
                 self._json({"error": "chua nhap du Namecheap API "
                                      "(user/key/IP) o muc Cai dat"}, 400)
                 return
             try:
-                self._json({"ok": True,
-                            "expiry": _nc_client(cfg).get_expiry_map()})
+                info, err = _fetch_nc_list_info(cfg)
+                self._json({"ok": not err,
+                            "expiry": {d: v["expiry"] for d, v in info.items()
+                                       if v["expiry"]},
+                            "error": err})
             except Exception as e:
                 self._json({"error": str(e)}, 500)
             return

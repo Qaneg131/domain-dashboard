@@ -149,11 +149,12 @@ class NCClient:
             raise NCError("setCustom khong tra ve Updated=true")
         return True
 
-    def get_expiry_map(self):
-        """Ngay het han cua tat ca domain trong tai khoan Namecheap.
-        Tra ve dict {domain: 'YYYY-MM-DD'} (chi cac domain co Expires
-        doc duoc). Doc het cac trang getList (PageSize=100)."""
-        out = {}
+    def _get_list_domains(self):
+        """Doc het cac trang namecheap.domains.getList (PageSize=100).
+        Tra ve list dict {name, expiry (ISO hoac None), autorenew
+        (True/False)} — AutoRenew la co that tren web Namecheap (chi
+        doc, khong doi gi)."""
+        out = []
         page = 1
         while True:
             root = self._call("namecheap.domains.getList", ListType="ALL",
@@ -163,10 +164,25 @@ class NCClient:
                 break
             for el in rows:
                 name = (el.get("Name") or "").strip().lower()
-                iso = _parse_nc_date(el.get("Expires") or "")
-                if name and iso:
-                    out[name] = iso
+                if not name:
+                    continue
+                out.append({"name": name,
+                            "expiry": _parse_nc_date(el.get("Expires") or ""),
+                            "autorenew": (el.get("AutoRenew") or "").strip().lower() == "true"})
             if len(rows) < 100 or page >= 50:
                 break
             page += 1
         return out
+
+    def get_expiry_map(self):
+        """Ngay het han cua tat ca domain trong tai khoan Namecheap.
+        Tra ve dict {domain: 'YYYY-MM-DD'} (chi cac domain co Expires
+        doc duoc). Doc het cac trang getList (PageSize=100)."""
+        return {d["name"]: d["expiry"] for d in self._get_list_domains()
+                if d["expiry"]}
+
+    def get_autorenew_map(self):
+        """Trang thai auto-renew cua tat ca domain trong tai khoan
+        Namecheap (theo co AutoRenew cua getList). Tra ve dict
+        {domain: True/False}. Chi doc, khong doi gi."""
+        return {d["name"]: d["autorenew"] for d in self._get_list_domains()}

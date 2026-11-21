@@ -24,6 +24,8 @@ STATE = {
     "zones": {},      # name -> {id, name, status, name_servers}
     "records": {},    # zone_id -> [rec]
     "nc_ns": {},      # domain -> [ns...]
+    "nc_expiry": {},   # domain -> "YYYY-MM-DD" (het han)
+    "nc_autorenew": {},  # domain -> True/False (co AutoRenew that)
     "nc_calls": 0,    # so lan goi Namecheap API (getList + setCustom)
     "nc_rate_limit": {},  # domain -> so lan con lai tra "Too many requests"
     "email": {},      # zone_id -> {enabled, status, rules:[], addresses:[]}
@@ -185,8 +187,9 @@ class MockHandler(BaseHTTPRequestHandler):
                 for dname, exp in STATE.get("nc_expiry", {}).items():
                     if search and search not in dname:
                         continue
+                    ar = "true" if STATE.get("nc_autorenew", {}).get(dname) else "false"
                     all_rows.append(
-                        f'<Domain Name="{dname}" AutoRenew="false" '
+                        f'<Domain Name="{dname}" AutoRenew="{ar}" '
                         f'IsLocked="false" Expires="{exp}" />')
                 rows = all_rows[(page - 1) * psize:page * psize]
                 xml = (f'<?xml version="1.0"?><ApiResponse Status="OK"{NS}><Errors/>'
@@ -1415,7 +1418,7 @@ def main():
     dash.sheet_write_status = _real_write
     print("  OK", flush=True)
 
-    print("TEST 46: get_expiry_map — ngay het han tu getList (phan trang) + _parse_nc_date...", flush=True)
+    print("TEST 46: get_expiry_map + get_autorenew_map — ngay het han va co AutoRenew tu getList (phan trang) + _parse_nc_date...", flush=True)
     assert _parse_nc_date("12/04/2026") == "2026-12-04"
     assert _parse_nc_date("1/5/2027") == "2027-01-05"
     assert _parse_nc_date("2026-12-04") == "2026-12-04"
@@ -1424,12 +1427,18 @@ def main():
     # Dat han rieng cho 2 domain de test doc + phan trang.
     STATE.setdefault("nc_expiry", {})["ar1.com"] = "12/04/2026"
     STATE["nc_expiry"]["ar2.com"] = "01/15/2027"
+    STATE.setdefault("nc_autorenew", {})["ar1.com"] = True
+    STATE["nc_autorenew"]["ar2.com"] = False
     nc46 = NCClient("testuser", "test-key", "1.2.3.4", base=base + "/xml.response")
     exp_map = nc46.get_expiry_map()
     assert exp_map["ar1.com"] == "2026-12-04", exp_map
     assert exp_map["ar2.com"] == "2027-01-15", exp_map
     # Domain khong co trong getList thi khong co trong map.
     assert "khongco.com" not in exp_map
+    # Co AutoRenew that (dung chung _get_list_domains voi get_expiry_map).
+    ar_map = nc46.get_autorenew_map()
+    assert ar_map["ar1.com"] is True, ar_map
+    assert ar_map["ar2.com"] is False, ar_map
     print("  OK", flush=True)
 
     print("TEST 47: chrome_autorenew local + _list_chrome_profiles — doc Local State, fallback quet thu muc...", flush=True)

@@ -305,7 +305,7 @@
   <div id="viewAr" style="display:none">
   <div class="card">
     <h2>Auto-renew (bằng Chrome) — bật tự động gia hạn trên Namecheap</h2>
-    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: tick chọn domain trong bảng dưới (đổi trang hay tìm domain mới vẫn giữ nguyên các domain đã chọn, chọn thêm được), chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain đã chọn.</p>
+    <p class="hint">API của Namecheap báo xong nhưng toggle trên web không đổi nên phải <b>bấm toggle thật trên Chrome</b>. Bước 1: bấm nút 1 để mở tab Namecheap Domain List, đăng nhập Namecheap xong. Bước 2: tick chọn domain trong bảng dưới (đổi trang hay tìm/lọc domain mới vẫn giữ nguyên các domain đã chọn, chọn thêm được), chọn cách xử lý hộp thoại Domain Privacy, bấm nút 2 — Dashboard gọi sang tool Chrome để tìm từng domain trong Domain List rồi bấm toggle Auto-Renew thật. Domain nào toggle đã <b>BẬT</b> rồi thì bỏ qua, không bấm (bấm sẽ tắt đi). Chỉ xử lý đúng các domain đã chọn. Muốn bật hàng loạt domain Xanh chưa có auto-renew: lọc Tình trạng = Xanh + Auto-renew = No, bấm "Chọn hết (đang lọc)" rồi bấm nút 2.</p>
     <div class="row" style="margin-top:8px">
       <label>Link sheet Tình trạng Sus</label>
       <input type="text" id="susSheetUrl" placeholder="dán link CSV xuất bản của sheet Sus (chỉ đọc để hiện trạng thái)">
@@ -317,7 +317,10 @@
       <h3 style="margin:0 0 8px">Tất cả domain trong sheet Sus</h3>
       <div class="row" style="margin-top:8px">
         <span>Đã chọn <b id="susSelCount">0</b> domain</span>
+        <button onclick="selectSusFiltered()">Chọn hết (đang lọc)</button>
         <button onclick="clearSusSelected()">Bỏ chọn tất cả</button>
+        <button onclick="loadArStatus(true)">Tải lại trạng thái auto-renew</button>
+        <span class="muted" id="arStatusMsg"></span>
       </div>
       <div class="row" style="margin-top:8px">
         <label>Tìm domain</label>
@@ -328,6 +331,12 @@
           <option value="sus">Đã Sus</option>
           <option value="mail">Sus mail</option>
           <option value="xanh">Xanh</option>
+        </select>
+        <label>Auto-renew</label>
+        <select id="susAllArFilter">
+          <option value="all">Tất cả</option>
+          <option value="yes">Yes (đã bật)</option>
+          <option value="no">No (chưa bật)</option>
         </select>
       </div>
       <div id="susAllPreview" style="margin-top:8px"></div>
@@ -557,6 +566,7 @@ async function refresh() {
   document.getElementById('chrome_profile_dir').value = cfg.chrome_profile_dir || '';
   loadArProfiles();
   loadSusStatus();
+  loadArStatus();
   if (!cfg.cf_token || !cfg.nc_api_key) document.getElementById('settingsBox').open = true;
   renderPresets();
   renderEmailPreset();
@@ -1066,6 +1076,28 @@ let SUS_MAP = {};
 let SUS_LOADED = false;
 let SUS_TIMER = null;
 let SUS_ALL_PAGE = 1;
+// Trang thai auto-renew that tren web Namecheap (co AutoRenew cua
+// getList) + ngay het han — dung de loc domain Xanh chua bat de bat
+// hang loat. 1 lan doc getList phuc vu ca cot Han va cot Auto-renew.
+let AR_MAP = {};
+let EXP_MAP = {};
+let AR_LOADED = false;
+async function loadArStatus(force) {
+  const msg = document.getElementById('arStatusMsg');
+  if (msg) msg.textContent = 'Đang tải trạng thái auto-renew…';
+  try {
+    const res = await api('/api/autorenew-status' + (force ? '?force=1' : ''));
+    AR_MAP = res.autorenew || {};
+    EXP_MAP = res.expiry || {};
+    AR_LOADED = true;
+    if (msg) msg.textContent = res.ok
+      ? `Đã tải trạng thái auto-renew của ${res.count} domain.`
+      : (res.error || 'Không tải được trạng thái auto-renew.');
+  } catch (e) {
+    if (msg) msg.textContent = 'Không tải được trạng thái auto-renew.';
+  }
+  renderSusAll();
+}
 // Domain da tick chon trong bang day du — luu trong Set (khong phu
 // thuoc DOM) nen doi trang hay tim/loc domain moi van giu nguyen,
 // chon them duoc (giong bang Quan ly domain).
@@ -1087,7 +1119,30 @@ function susRowObj(d, info) {
     else if (s.includes('xanh')) cat = 'xanh';
     else cat = 'khac';
   }
-  return { d, info, st, cat, dateNum: parseSusDate(info ? info.date : '') };
+  // Trang thai auto-renew that: true = da bat, false = chua bat,
+  // null = khong ro (domain khong co trong tai khoan Namecheap).
+  const ar = d in AR_MAP ? !!AR_MAP[d] : null;
+  // Ngay het han (ISO YYYY-MM-DD) tu getList, null = khong ro.
+  const exp = EXP_MAP[d] || null;
+  return { d, info, st, cat, ar, exp, dateNum: parseSusDate(info ? info.date : '') };
+}
+function arBadge(ar) {
+  if (ar === true) return '<span class="badge ok">Yes</span>';
+  if (ar === false) return '<span class="badge no">No</span>';
+  return '<span class="muted">—</span>';
+}
+// Cot Han: DD/MM/YYYY + so ngay con lai (do khi <=30 ngay hoac da
+// het han, cam khi <=90 ngay) — giong cot Han o bang Quan ly domain.
+function susExpCell(iso) {
+  if (!iso) return '<span class="muted">—</span>';
+  const dd = iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
+  const ms = new Date(iso + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime();
+  if (isNaN(ms)) return `<span>${esc(dd)}</span>`;
+  const days = Math.round(ms / 86400000);
+  if (days < 0) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">hết hạn ${-days} ngày trước</span>`;
+  if (days <= 30) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+  if (days <= 90) return `<span class="badge wait">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+  return `<span>${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
 }
 function sortSusRows(rows, dir) {
   // Mac dinh theo Ngay ve (cot C) tang dan — ngay gan nhat truoc;
@@ -1104,13 +1159,14 @@ function susRowsHtml(pageRows, sortDir, sortFn) {
   const body = pageRows.map(r => {
     const checked = SUS_SELECTED.has(r.d) ? 'checked' : '';
     return `<tr><td><input type="checkbox" class="sus-check" data-d="${esc(r.d)}" ${checked} onchange="toggleSusSelect(this)"></td>` +
-      `<td class="mono">${esc(r.d)}</td><td>${susBadge(r.st, !!r.info)}</td>` +
+      `<td class="mono">${esc(r.d)}</td><td>${susExpCell(r.exp)}</td>` +
+      `<td>${arBadge(r.ar)}</td><td>${susBadge(r.st, !!r.info)}</td>` +
       `<td>${r.info && r.info.date ? esc(r.info.date) : '<span class="muted">—</span>'}</td>` +
       `<td>${r.info && r.info.days ? esc(r.info.days) : '<span class="muted">—</span>'}</td></tr>`;
   }).join('');
   const arrow = sortDir === 1 ? '▲' : '▼';
-  return `<table class="tbl" style="width:100%"><thead><tr><th><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSusSelectAll(this)" title="Chọn hết trang này"></th><th>Domain</th><th>Tình trạng Sus</th>` +
-    `<th><a href="javascript:void(0)" onclick="${sortFn}()" style="color:inherit">Ngày về ${arrow}</a></th><th>Số ngày</th></tr></thead><tbody>${body || '<tr><td colspan="5" class="muted">Không có domain nào khớp bộ lọc.</td></tr>'}</tbody></table>`;
+  return `<table class="tbl" style="width:100%"><thead><tr><th><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="toggleSusSelectAll(this)" title="Chọn hết trang này"></th><th>Domain</th><th>Hạn</th><th>Auto-renew</th><th>Tình trạng Sus</th>` +
+    `<th><a href="javascript:void(0)" onclick="${sortFn}()" style="color:inherit">Ngày về ${arrow}</a></th><th>Số ngày</th></tr></thead><tbody>${body || '<tr><td colspan="7" class="muted">Không có domain nào khớp bộ lọc.</td></tr>'}</tbody></table>`;
 }
 function updateSusSelCount() {
   const el = document.getElementById('susSelCount');
@@ -1187,8 +1243,11 @@ function renderSusAll() {
   const rows = Object.keys(SUS_MAP).map(d => susRowObj(d, SUS_MAP[d]));
   const q = (document.getElementById('susAllSearch').value || '').trim().toLowerCase();
   const f = document.getElementById('susAllFilter').value;
+  const arf = document.getElementById('susAllArFilter').value;
   const filtered = rows.filter(r =>
-    (f === 'all' || r.cat === f) && (!q || r.d.includes(q)));
+    (f === 'all' || r.cat === f) &&
+    (arf === 'all' || (arf === 'yes' && r.ar === true) || (arf === 'no' && r.ar === false)) &&
+    (!q || r.d.includes(q)));
   sortSusRows(filtered, SUS_ALL_SORT_DIR);
   const totalPages = Math.max(1, Math.ceil(filtered.length / SUS_PER_PAGE));
   if (SUS_ALL_PAGE > totalPages) SUS_ALL_PAGE = totalPages;
@@ -1201,6 +1260,19 @@ function renderSusAll() {
 }
 function toggleSusAllSort() { SUS_ALL_SORT_DIR *= -1; renderSusAll(); }
 function setSusAllPage(n) { SUS_ALL_PAGE = Math.max(1, n); renderSusAll(); }
+// Chon het domain DANG LOC (tat ca cac trang, khong chi trang dang
+// hien) — de loc domain Xanh chua bat auto-renew roi bat hang loat.
+function selectSusFiltered() {
+  const q = (document.getElementById('susAllSearch').value || '').trim().toLowerCase();
+  const f = document.getElementById('susAllFilter').value;
+  const arf = document.getElementById('susAllArFilter').value;
+  Object.keys(SUS_MAP).map(d => susRowObj(d, SUS_MAP[d])).filter(r =>
+    (f === 'all' || r.cat === f) &&
+    (arf === 'all' || (arf === 'yes' && r.ar === true) || (arf === 'no' && r.ar === false)) &&
+    (!q || r.d.includes(q))).forEach(r => SUS_SELECTED.add(r.d));
+  updateSusSelCount();
+  renderSusAll();
+}
 async function saveSusSheetUrl() {
   const v = document.getElementById('susSheetUrl').value.trim();
   await api('/api/settings', { sus_sheet_csv_url: v });
@@ -2050,6 +2122,8 @@ refresh().then(() => {
   });
   const susAllFilter = document.getElementById('susAllFilter');
   if (susAllFilter) susAllFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
+  const susAllArFilter = document.getElementById('susAllArFilter');
+  if (susAllArFilter) susAllArFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
 });
 </script>
 </body>

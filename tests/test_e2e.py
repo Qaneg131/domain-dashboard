@@ -291,6 +291,8 @@ def main():
     # Han domain: doc ngay het han tu Namecheap getList.
     STATE.setdefault("nc_expiry", {})["ar1.com"] = "12/04/2026"
     STATE["nc_expiry"]["ar2.com"] = "01/15/2027"
+    STATE.setdefault("nc_autorenew", {})["ar1.com"] = True
+    STATE["nc_autorenew"]["ar2.com"] = False
     exp = call("GET", "/api/expiry")
     assert exp["ok"], exp
     assert exp["expiry"]["ar1.com"] == "2026-12-04", exp
@@ -374,6 +376,12 @@ def main():
     sus2 = call("GET", "/api/sus-status")
     assert not sus2["ok"] and "chua nhap link" in sus2.get("error", ""), sus2
     print("SUS-STATUS OK: doc CSV sheet Sus qua endpoint + bao loi khi chua nhap link", flush=True)
+    # Trang thai auto-renew: doc co AutoRenew tu getList (mock).
+    # (E2E da set nc_user/key/IP + NC_API_BASE tro ve mock o tren.)
+    ar = call("GET", "/api/autorenew-status")
+    assert ar["ok"] and ar["autorenew"].get("ar1.com") is True, ar
+    assert ar["autorenew"].get("ar2.com") is False, ar
+    print("AUTORENEW-STATUS OK: doc co AutoRenew tu getList qua endpoint", flush=True)
     print("AUTORENEW-BROWSER OK: prepare + chay fake script + doc CSV + chon profile + bao loi khi khong co domain + liet ke ho so", flush=True)
     mock.shutdown()
     print("E2E OK")
