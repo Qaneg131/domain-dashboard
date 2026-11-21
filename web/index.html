@@ -338,6 +338,14 @@
           <option value="yes">Yes (đã bật)</option>
           <option value="no">No (chưa bật)</option>
         </select>
+        <label>Hạn</label>
+        <select id="susAllExpFilter">
+          <option value="all">Tất cả</option>
+          <option value="30">Sắp hết ≤30 ngày</option>
+          <option value="60">Sắp hết ≤60 ngày</option>
+          <option value="expired">Đã hết hạn</option>
+          <option value="unknown">Chưa rõ hạn</option>
+        </select>
       </div>
       <div id="susAllPreview" style="margin-top:8px"></div>
     </div>
@@ -1131,18 +1139,44 @@ function arBadge(ar) {
   if (ar === false) return '<span class="badge no">No</span>';
   return '<span class="muted">—</span>';
 }
+// So ngay con lai den ngay het han (am = da het han). null = chua ro han.
+function susExpDays(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime();
+  if (isNaN(ms)) return null;
+  return Math.round(ms / 86400000);
+}
 // Cot Han: DD/MM/YYYY + so ngay con lai (do khi <=30 ngay hoac da
 // het han, cam khi <=90 ngay) — giong cot Han o bang Quan ly domain.
 function susExpCell(iso) {
   if (!iso) return '<span class="muted">—</span>';
   const dd = iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4);
-  const ms = new Date(iso + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime();
-  if (isNaN(ms)) return `<span>${esc(dd)}</span>`;
-  const days = Math.round(ms / 86400000);
+  const days = susExpDays(iso);
+  if (days === null) return `<span>${esc(dd)}</span>`;
   if (days < 0) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">hết hạn ${-days} ngày trước</span>`;
   if (days <= 30) return `<span class="badge no">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
   if (days <= 90) return `<span class="badge wait">${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
   return `<span>${esc(dd)}</span><br><span class="muted">còn ${days} ngày</span>`;
+}
+// Loc chung cho bang Sus: tim theo ten + Tinh trang Sus + Auto-renew +
+// Han (<=30 / <=60 / da het han / chua ro). Dung chung cho ca hien
+// bang (renderSusAll) va 'Chon het (dang loc)' (selectSusFiltered).
+function susRowMatchesFilters(r) {
+  const q = (document.getElementById('susAllSearch').value || '').trim().toLowerCase();
+  const f = document.getElementById('susAllFilter').value;
+  const arf = document.getElementById('susAllArFilter').value;
+  const expf = document.getElementById('susAllExpFilter').value;
+  if (f !== 'all' && r.cat !== f) return false;
+  if (arf !== 'all' && !((arf === 'yes' && r.ar === true) || (arf === 'no' && r.ar === false))) return false;
+  if (expf !== 'all') {
+    const days = susExpDays(r.exp);
+    if (expf === '30' && !(days !== null && days >= 0 && days <= 30)) return false;
+    if (expf === '60' && !(days !== null && days >= 0 && days <= 60)) return false;
+    if (expf === 'expired' && !(days !== null && days < 0)) return false;
+    if (expf === 'unknown' && days !== null) return false;
+  }
+  if (q && !r.d.includes(q)) return false;
+  return true;
 }
 function sortSusRows(rows, dir) {
   // Mac dinh theo Ngay ve (cot C) tang dan — ngay gan nhat truoc;
@@ -1241,13 +1275,7 @@ function renderSusAll() {
     return;
   }
   const rows = Object.keys(SUS_MAP).map(d => susRowObj(d, SUS_MAP[d]));
-  const q = (document.getElementById('susAllSearch').value || '').trim().toLowerCase();
-  const f = document.getElementById('susAllFilter').value;
-  const arf = document.getElementById('susAllArFilter').value;
-  const filtered = rows.filter(r =>
-    (f === 'all' || r.cat === f) &&
-    (arf === 'all' || (arf === 'yes' && r.ar === true) || (arf === 'no' && r.ar === false)) &&
-    (!q || r.d.includes(q)));
+  const filtered = rows.filter(susRowMatchesFilters);
   sortSusRows(filtered, SUS_ALL_SORT_DIR);
   const totalPages = Math.max(1, Math.ceil(filtered.length / SUS_PER_PAGE));
   if (SUS_ALL_PAGE > totalPages) SUS_ALL_PAGE = totalPages;
@@ -1263,13 +1291,8 @@ function setSusAllPage(n) { SUS_ALL_PAGE = Math.max(1, n); renderSusAll(); }
 // Chon het domain DANG LOC (tat ca cac trang, khong chi trang dang
 // hien) — de loc domain Xanh chua bat auto-renew roi bat hang loat.
 function selectSusFiltered() {
-  const q = (document.getElementById('susAllSearch').value || '').trim().toLowerCase();
-  const f = document.getElementById('susAllFilter').value;
-  const arf = document.getElementById('susAllArFilter').value;
-  Object.keys(SUS_MAP).map(d => susRowObj(d, SUS_MAP[d])).filter(r =>
-    (f === 'all' || r.cat === f) &&
-    (arf === 'all' || (arf === 'yes' && r.ar === true) || (arf === 'no' && r.ar === false)) &&
-    (!q || r.d.includes(q))).forEach(r => SUS_SELECTED.add(r.d));
+  Object.keys(SUS_MAP).map(d => susRowObj(d, SUS_MAP[d]))
+    .filter(susRowMatchesFilters).forEach(r => SUS_SELECTED.add(r.d));
   updateSusSelCount();
   renderSusAll();
 }
@@ -2124,6 +2147,8 @@ refresh().then(() => {
   if (susAllFilter) susAllFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
   const susAllArFilter = document.getElementById('susAllArFilter');
   if (susAllArFilter) susAllArFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
+  const susAllExpFilter = document.getElementById('susAllExpFilter');
+  if (susAllExpFilter) susAllExpFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
 });
 </script>
 </body>
