@@ -12,18 +12,20 @@
     --gray: #857c6f; --border: #e6dfd3; --border-soft: #efe9dd;
     --green-bg: #dcf2e3; --green: #137333; --red-bg: #fdecea; --red: #b3261e;
     --amber-bg: #fff3cd; --amber: #7a5b00;
+    --ctl-h: 36px; --ctl-h-sm: 30px; --radius: 8px;
   }
+  html, body { overflow-x: clip; }
   body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; margin: 0; background: var(--ivory); color: var(--ink); font-size: 14px; line-height: 1.5; }
   main { max-width: none; margin: 0; padding: 24px 28px 48px; flex: 1; min-width: 0; }
   .layout { display: flex; align-items: stretch; min-height: 100vh; }
 
   /* --- Sidebar --- */
   .sidebar { width: 232px; flex: none; background: var(--ink); color: var(--ivory); padding: 28px 0 20px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; }
-  .sidebar .brand { padding: 0 22px 2px; font-size: 23px; font-weight: 700; letter-spacing: .01em; }
+  .sidebar .brand { padding: 0 22px 2px; font-size: 20px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; }
   .sidebar .brand span { color: var(--copper-lt); }
   .sidebar .brand-sub { padding: 0 22px 20px; margin: 0; color: #a89e8d; font-size: 12.5px; line-height: 1.6; }
   .sidebar .nav { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
-  .sidebar .nav-item { display: block; width: 100%; text-align: left; padding: 11px 14px; border-radius: 9px; background: transparent; color: #cfc7b8; font-size: 14px; font-weight: 600; border: 1px solid transparent; }
+  .sidebar .nav-item { display: block; width: 100%; text-align: left; padding: 0 14px; height: 40px; line-height: 40px; border-radius: 9px; background: transparent; color: #cfc7b8; font-size: 14px; font-weight: 600; border: 1px solid transparent; }
   .sidebar .nav-item:hover { background: #2e2822; color: #fff; }
   .sidebar .nav-item.active { background: #2e2822; color: #fff; border-color: var(--copper); box-shadow: inset 3px 0 0 var(--copper-lt); }
   @media (max-width: 760px) {
@@ -33,11 +35,11 @@
   }
 
   /* --- Card --- */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; margin-bottom: 18px; box-shadow: 0 1px 3px rgba(22,19,15,.05); }
-  .card h2 { margin: 0 0 14px; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(22,19,15,.05); }
+  .card h2 { margin: 0 0 14px; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 9px; line-height: 1.3; }
   .card h2::before { content: ''; width: 4px; height: 18px; background: var(--copper); border-radius: 2px; flex: none; }
   /* Card cau hinh gap lai (details): summary nhin nhu h2, co mui ten mo/dong. */
-  details.card > summary { list-style: none; cursor: pointer; margin: 0; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 9px; }
+  details.card > summary { list-style: none; cursor: pointer; margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 9px; line-height: 1.3; }
   details.card > summary::-webkit-details-marker { display: none; }
   details.card > summary::before { content: ''; width: 4px; height: 18px; background: var(--copper); border-radius: 2px; flex: none; }
   details.card > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--gray); border-bottom: 2px solid var(--gray); transform: rotate(45deg); transition: transform .15s; flex: none; }
@@ -46,12 +48,15 @@
 
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
   label { font-size: 13px; color: var(--charcoal); }
-  input, select { padding: 8px 11px; border: 1px solid #d8d0c2; border-radius: 8px; font-size: 14px; background: #fff; color: var(--ink); }
+  input, select { height: var(--ctl-h); padding: 0 11px; border: 1px solid #d8d0c2; border-radius: var(--radius); font-size: 14px; background: #fff; color: var(--ink); }
   input:focus, select:focus { outline: none; border-color: var(--copper); box-shadow: 0 0 0 3px rgba(160,106,53,.15); }
   input[type=text], input[type=password] { flex: 1; min-width: 200px; }
+  input[type=number] { width: 90px; flex: none; }
+  input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--copper); flex: none; }
+  textarea { padding: 10px 11px; border: 1px solid #d8d0c2; border-radius: var(--radius); font-size: 14px; font-family: inherit; }
 
-  /* --- Nut bam --- */
-  button { padding: 9px 15px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; background: var(--ink); color: #fff; transition: background .15s, border-color .15s, box-shadow .15s, transform .05s; }
+  /* --- Nut bam: cung chieu cao 36px, canh giua doc --- */
+  button { height: var(--ctl-h); padding: 0 15px; border: none; border-radius: var(--radius); cursor: pointer; font-size: 14px; font-weight: 600; background: var(--ink); color: #fff; transition: background .15s, border-color .15s, box-shadow .15s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
   button:hover { background: #2e2822; }
   button:active { transform: translateY(1px); }
   button:focus-visible { outline: 2px solid var(--copper-lt); outline-offset: 2px; }
@@ -60,20 +65,20 @@
   button.warn { background: var(--red); }
   button.warn:hover { background: #931f18; }
   button:disabled { opacity: .5; cursor: wait; }
-  button.small { padding: 7px 11px; font-size: 13px; }
+  button.small { height: var(--ctl-h-sm); padding: 0 11px; font-size: 13px; }
   /* Nut bat/tat (vd Tu dong setup): hien luon chu Bat / Tat de biet trang thai. */
-  button.toggle { min-width: 64px; padding: 7px 15px; border-radius: 999px; font-size: 13px; }
+  button.toggle { min-width: 64px; height: var(--ctl-h-sm); padding: 0 15px; border-radius: 999px; font-size: 13px; }
   button.toggle.off { background: #e3ddd2; color: var(--charcoal); }
   button.toggle.off:hover { background: #d8d0c2; }
   button.toggle.on { background: #2e7d32; }
   button.toggle.on:hover { background: #27692b; }
 
-  /* --- Thanh cong cu cua bang Domains --- */
+  /* --- Thanh cong cu cua bang Domains: 1 hang, cac nhom can deu nhau --- */
   .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .tb-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
   .tb-sep { width: 1px; height: 24px; background: #e3ddd2; flex: none; }
   .toolbar input[type=text] { flex: none; }
-  .stat { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; background: var(--ivory); color: var(--charcoal); border: 1px solid #e3ddd2; white-space: nowrap; }
+  .stat { display: inline-flex; align-items: center; height: var(--ctl-h-sm); padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--ivory); color: var(--charcoal); border: 1px solid #e3ddd2; white-space: nowrap; }
   .stat:empty { display: none; }
   .stat.err { background: var(--red-bg); color: var(--red); border-color: #f3c1bd; }
   .stat.current { background: #fdf6ec; border-color: var(--copper-lt); color: var(--ink); font-weight: 700; }
@@ -90,6 +95,8 @@
   .sheet-stat.warn .num { color: #b45309; }
   .sheet-stat.ok .num { color: #15803d; }
   .sheet-stat.err .num { color: var(--red); }
+  #sheetResults { overflow-x: auto; }
+  #susAllPreview { overflow-x: auto; }
 
   /* Bang ket qua sheet: header dam, dong hover, bo tron. */
   .tbl { border: 1px solid #e8e1d5; border-radius: 10px; overflow: hidden; }
@@ -109,27 +116,34 @@
   .mailwrap tbody tr:hover td:first-child { background: #fdf6ec; }
   .mailwrap td .cellval { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
   .mailwrap td .cellval.wrap { white-space: normal; word-break: break-all; }
-  .mailwrap input.note-in { min-width: 160px; padding: 6px 8px; font-size: 13px; }
-  button.iconbtn { padding: 4px 8px; font-size: 13px; background: #fff; color: var(--ink); border: 1px solid #d8d0c2; border-radius: 6px; margin-left: 4px; }
+  .mailwrap input.note-in { min-width: 160px; height: var(--ctl-h-sm); padding: 0 8px; font-size: 13px; }
+  button.iconbtn { height: var(--ctl-h-sm); padding: 0 8px; font-size: 13px; background: #fff; color: var(--ink); border: 1px solid #d8d0c2; border-radius: 6px; margin-left: 4px; }
   button.iconbtn:hover { background: var(--ivory); border-color: var(--ink); }
   button.iconbtn.done { background: var(--green-bg); border-color: #2e7d32; color: var(--green); }
   .mailwarn { background: var(--amber-bg); border: 1px solid #e8c96a; color: var(--amber); border-radius: 8px; padding: 9px 12px; margin-bottom: 8px; font-size: 13px; }
 
-  /* Thanh thao tac hang loat: dinh duoi man hinh khi cuon bang, de nut
-     "Kiem tra da chon" luon trong tam tay ma khong can nut trung lap
-     duoi bang. Noi bat khi co domain duoc chon. */
-  .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--ivory); border: 1px solid #e8e1d5; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; position: sticky; bottom: 12px; z-index: 5; box-shadow: 0 4px 16px rgba(22,19,15,.10); }
+  /* Thanh thao tac hang loat: 2 hang ro rang (chinh / phu), dinh duoi
+     man hinh khi cuon bang de cac nut luon trong tam tay. */
+  .bulkbar { display: flex; flex-direction: column; gap: 8px; background: var(--ivory); border: 1px solid #e8e1d5; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; position: sticky; bottom: 12px; z-index: 5; box-shadow: 0 4px 16px rgba(22,19,15,.10); }
   .bulkbar.has-sel { background: #fdf6ec; border-color: var(--copper-lt); }
-  .bulkbar .sel-count { font-weight: 700; font-size: 13px; }
+  .bulk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bulkbar .sel-count { font-weight: 700; font-size: 13px; margin-right: 4px; }
   .bulkbar .spacer { flex: 1; }
   .bulkbar label { min-width: 0; }
 
+  /* Bang chinh: boc trong khung cuon ngang de khong bao gio tran trang;
+     layout co dinh theo colgroup de cot nut thao tac luon thay duoc. */
+  .tablewrap { overflow-x: auto; overflow-y: visible; margin: 0 -22px; padding: 0 22px; }
+  .tablewrap table { table-layout: fixed; }
+  .tablewrap td { overflow-wrap: break-word; }
+  /* Cot DNS: chu mono nho hon 1 chut de ten nameserver vua 1 dong. */
+  .tablewrap td:nth-child(3) .mono { font-size: 11px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
   thead th { position: sticky; top: 0; background: var(--surface); z-index: 2; color: var(--gray); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid #e3ddd2; }
-  thead select { padding: 4px 6px; font-size: 12px; }
+  thead select { height: 28px; padding: 0 6px; font-size: 12px; }
   tbody tr:hover { background: #faf7f1; }
-  .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 700; line-height: 1.5; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.5; }
   .ok { background: var(--green-bg); color: var(--green); }
   .no { background: var(--red-bg); color: var(--red); }
   .wait { background: var(--amber-bg); color: var(--amber); }
@@ -138,7 +152,7 @@
   #log { white-space: pre-wrap; background: var(--ink); color: #e8e2d6; padding: 14px; border-radius: 10px; font-family: Consolas, monospace; font-size: 13px; max-height: 260px; overflow: auto; }
   .preset-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
   .preset-row input { flex: 1; }
-  .preset-row select { width: 90px; }
+  .preset-row select { width: 90px; flex: none; }
   .diag { border: 1px solid #e5b4b4; background: #fff5f5; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
   .diag .err { color: var(--red); font-weight: 600; }
   .diag .fix { color: var(--green); font-weight: 600; margin-top: 4px; }
@@ -146,7 +160,7 @@
   .hint { font-size: 13px; color: var(--gray); }
   .modal-bg { position: fixed; inset: 0; background: rgba(22,19,15,.55); display: none; align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 10; overflow: auto; }
   .modal-bg.open { display: flex; }
-  .modal { background: var(--surface); border-radius: 14px; max-width: 760px; width: 100%; padding: 22px; box-shadow: 0 12px 40px rgba(22,19,15,.25); }
+  .modal { background: var(--surface); border-radius: 12px; max-width: 760px; width: 100%; padding: 22px; box-shadow: 0 12px 40px rgba(22,19,15,.25); }
   .modal h2 { margin: 0 0 4px; }
   .modal h3 { margin: 18px 0 8px; font-size: 15px; border-top: 1px solid #eee7db; padding-top: 14px; }
   .modal h3:first-of-type { border-top: none; padding-top: 0; }
@@ -186,25 +200,28 @@
       </div>
     </div>
     <div class="bulkbar" id="bulkBar">
-      <span class="sel-count" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
-      <span class="tb-sep"></span>
-      <button class="secondary small" onclick="setupSelected()">Setup đã chọn</button>
-      <button class="secondary small" onclick="applyRecordsSelected()">Áp record đã chọn</button>
-      <button class="secondary small" onclick="setupEmailSelected()">Setup email đã chọn</button>
-      <span class="tb-sep"></span>
-      <label>SSL</label>
-      <select id="bulkSsl">
-        <option value="flexible">Flexible</option><option value="full">Full</option>
-        <option value="strict">Full (strict)</option>
-      </select>
-      <button class="secondary small" onclick="applyHttpsSelected()">Áp HTTPS đã chọn</button>
-      <button class="secondary small" onclick="bypassCacheSelected(true)">Bypass cache đã chọn</button>
-      <span class="tb-group" style="margin-left:auto">
+      <div class="bulk-row">
+        <span class="sel-count" id="selectedCount">Chưa chọn domain nào — tick ô vuông ở đầu mỗi dòng để chọn nhiều domain.</span>
+        <button class="secondary small" onclick="setupSelected()">Setup đã chọn</button>
+        <button class="secondary small" onclick="applyRecordsSelected()">Áp record đã chọn</button>
+        <button class="secondary small" onclick="setupEmailSelected()">Setup email đã chọn</button>
         <button class="secondary small" onclick="checkSelected()">Kiểm tra đã chọn</button>
+      </div>
+      <div class="bulk-row">
+        <label>SSL</label>
+        <select id="bulkSsl">
+          <option value="flexible">Flexible</option><option value="full">Full</option>
+          <option value="strict">Full (strict)</option>
+        </select>
+        <button class="secondary small" onclick="applyHttpsSelected()">Áp HTTPS đã chọn</button>
+        <button class="secondary small" onclick="bypassCacheSelected(true)">Bypass cache đã chọn</button>
+        <span class="spacer"></span>
         <button class="warn small" onclick="deleteZonesSelected()">Xóa zone đã chọn</button>
-      </span>
+      </div>
     </div>
+    <div class="tablewrap">
     <table>
+      <colgroup><col style="width:36px"><col style="width:140px"><col style="width:200px"><col style="width:110px"><col style="width:100px"><col style="width:110px"><col style="width:80px"><col style="width:110px"><col style="width:190px"></colgroup>
       <thead>
         <tr><th><input type="checkbox" id="checkAll" onchange="toggleCheckAll(this.checked)"></th><th><a href="#" id="nameSortLabel" onclick="toggleNameSort();return false" title="Bấm để đổi A-Z / Z-A">Name ↑</a></th><th>DNS</th><th>Record</th><th>Email routing</th><th>HTTPS</th><th>Cache</th><th>Hạn</th><th></th></tr>
         <tr><th></th><th></th>
@@ -218,6 +235,7 @@
       </thead>
       <tbody id="domainTable"><tr><td colspan="8" class="muted">Đang tải…</td></tr></tbody>
     </table>
+    </div>
     <div class="row" id="pager"></div>
     </div>
   </div>
