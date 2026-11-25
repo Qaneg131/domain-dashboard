@@ -2528,6 +2528,30 @@ class Handler(BaseHTTPRequestHandler):
                 # Ghi chu doi thi bo cache de lan doc sau thay ngay.
                 MAIL_CACHE["at"] = 0.0
                 self._json({"ok": True})
+            elif path == "/api/sheet-recheck":
+                # Kiem tra lai 1 domain trong hang cho duyet: check moi
+                # record that, luu status, roi tu xoa khoi hang cho neu
+                # preset hien tai da khop preset sheet muon.
+                d = str(body.get("domain", "")).strip().lower()
+                review = cfg.get("sheet_review") or []
+                q = next((x for x in review if x.get("domain") == d), None)
+                if not q:
+                    self._json({"error": "domain không có trong hàng chờ duyệt"}, 400)
+                    return
+                try:
+                    cur = check_domain(d, cfg, skip_nc=True)
+                    _save_check_result(st, d, cur)
+                except Exception as e:
+                    self._json({"error": str(e)}, 400)
+                    return
+                pruned = _sheet_prune_review(cfg, st)
+                save_config(cfg)
+                save_status(st)
+                self._json({"ok": True, "domain": d,
+                            "preset": cur.get("records_preset"),
+                            "want": q.get("preset"),
+                            "pruned": pruned,
+                            "in_queue": d not in pruned})
             elif path == "/api/sheet-accept":
                 # Chap nhan domain trong hang cho duyet: setup theo preset
                 # trong sheet, ghi 'da set up' ve cot J, xoa khoi hang doi.

@@ -1526,7 +1526,16 @@ def main():
     cfg51["sheet_review"].append({"domain": "keep51.com", "row": 1396,
                                  "preset": "Web Anh Long", "current": "Web Chị Hân",
                                  "loai": "Web Thuần Long"})
-    pruned51 = dash._sheet_prune_review(cfg51, st51)
+    pruned51 = None
+    _real_save_cfg51 = dash.save_config
+    _real_save_st51 = dash.save_status
+    dash.save_config = lambda c: None
+    dash.save_status = lambda s: None
+    try:
+        pruned51 = dash._sheet_prune_review(cfg51, st51)
+    finally:
+        dash.save_config = _real_save_cfg51
+        dash.save_status = _real_save_st51
     assert pruned51 == ["prune51.com"], pruned51
     assert [q["domain"] for q in cfg51["sheet_review"]] == ["keep51.com"], cfg51["sheet_review"]
     # Status da luu cua prune51.com duoc cap nhat theo record that.

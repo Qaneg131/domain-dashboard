@@ -127,6 +127,24 @@ def main():
     print("APPLY shop:", res2["ok"], res2["steps"][0]["detail"], flush=True)
     assert res2["ok"], res2
 
+    # Sheet recheck: testb.com dang dung 'shop' (A @ -> 2.2.2.2) nhung
+    # hang cho con ghi cu 'web' — recheck phai tu xoa khoi hang cho.
+    cfg_e2e = store.load_config()
+    cfg_e2e["sheet_review"] = [{"domain": "testb.com", "row": 1389,
+                                "preset": "shop", "current": "web",
+                                "loai": "Web Thuần Long"}]
+    store.save_config(cfg_e2e)
+    rc = call("POST", "/api/sheet-recheck", {"domain": "testb.com"})
+    assert rc["ok"] and rc["preset"] == "shop", rc
+    assert rc["in_queue"] is False and rc["pruned"] == ["testb.com"], rc
+    assert call("GET", "/api/state")["config"]["sheet_review"] == [], "hang cho phai trong"
+    try:
+        call("POST", "/api/sheet-recheck", {"domain": "notqueued.com"})
+        raise AssertionError("recheck domain khong co trong hang cho phai 400")
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    print("SHEET-RECHECK OK: check lai record that, tu xoa khoi hang cho khi da khop + 400 khi khong co trong hang cho", flush=True)
+
     assert "newtest.com" in call("POST", "/api/domains", {"domain": "newtest.com"})["domains"]
     assert "newtest.com" not in call("POST", "/api/domains/delete",
                                       {"domain": "newtest.com"})["domains"]

@@ -951,7 +951,23 @@ function renderSheetReview() {
   const q = cfg.sheet_review || [];
   const box = document.getElementById('sheetReview');
   if (!q.length) { box.innerHTML = '<p class="muted">Không có domain nào chờ duyệt.</p>'; return; }
-  box.innerHTML = q.map(x => `<div class="row"><span style="flex:1"><b>${esc(x.domain)}</b> (dòng ${x.row}) — đang dùng preset <b>${esc(x.current || '')}</b>, sheet muốn <b>${esc(x.preset)}</b> (${esc(x.loai || '')})</span><button class="small" onclick="acceptSheetReview('${esc(x.domain)}', this)">Chấp nhận — setup theo ${esc(x.preset)}</button><button class="warn small" onclick="rejectSheetReview('${esc(x.domain)}')">Từ chối</button></div>`).join('');
+  box.innerHTML = q.map(x => `<div class="row"><span style="flex:1"><b>${esc(x.domain)}</b> (dòng ${x.row}) — đang dùng preset <b>${esc(x.current || '')}</b>, sheet muốn <b>${esc(x.preset)}</b> (${esc(x.loai || '')})</span><button class="small" onclick="recheckSheetReview('${esc(x.domain)}', this)">Kiểm tra lại</button><button class="small" onclick="acceptSheetReview('${esc(x.domain)}', this)">Chấp nhận — setup theo ${esc(x.preset)}</button><button class="warn small" onclick="rejectSheetReview('${esc(x.domain)}')">Từ chối</button></div>`).join('');
+}
+async function recheckSheetReview(d, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Đang kiểm tra…';
+  const res = await api('/api/sheet-recheck', { domain: d });
+  btn.disabled = false;
+  btn.textContent = 'Kiểm tra lại';
+  if (!res.ok) { alert(res.error || 'Kiểm tra lỗi.'); return; }
+  // Neu preset that da khop sheet thi muc tu bien khoi hang cho; neu
+  // van xung dot thi cap nhat lai preset hien tai trong muc do.
+  await refresh();
+  if (res.in_queue) {
+    log(`Kiểm tra lại ${d}: preset hiện tại là '${res.preset || '(chưa khớp preset nào)'}', sheet muốn '${res.want}' — vẫn chờ duyệt.`);
+  } else {
+    log(`Kiểm tra lại ${d}: preset hiện tại đã là '${res.preset}' (khớp sheet) — đã tự bỏ khỏi hàng chờ.`);
+  }
 }
 async function acceptSheetReview(d, btn) {
   // Khoa nut + doi chu ngay de biet la da bam (setup co the chay vai phut,
