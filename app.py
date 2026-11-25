@@ -1274,6 +1274,39 @@ def sheet_write_status(row, value, cfg):
         return False, str(e)
 
 
+def _sheet_prune_review(cfg, st):
+    """Xoa khoi hang cho duyet nhung muc ma preset hien tai (record THAT
+    tu Cloudflare) da khop voi preset sheet muon. Khong tin status da luu
+    — status cu co the sai vi record da doi tay/ngoai Dashboard. Dong
+    thoi luu lai status moi de bang chinh hien dung preset. Loi check thi
+    giu muc lai (an toan). Tra ve danh sach domain da xoa."""
+    review = cfg.get("sheet_review") or []
+    if not review:
+        return []
+    kept, pruned = [], []
+    for q in review:
+        d = (q.get("domain") or "").strip().lower()
+        want = q.get("preset")
+        if not d or not want:
+            kept.append(q)
+            continue
+        try:
+            cur = check_domain(d, cfg, skip_nc=True)
+            _save_check_result(st, d, cur)
+            cur_preset = cur.get("records_preset")
+        except Exception:
+            cur_preset = None
+        if cur_preset == want:
+            pruned.append(d)
+        else:
+            kept.append(q)
+    if pruned:
+        cfg["sheet_review"] = kept
+        save_config(cfg)
+        save_status(st)
+    return pruned
+
+
 def _sheet_classify(rows, cfg, st):
     """Gan hanh dong cho moi dong sheet: 'setup' (clean, se tu setup),
     'review' (xung dot preset -> cho duyet), 'skip' (da set up / chua map
@@ -1305,6 +1338,16 @@ def _sheet_classify(rows, cfg, st):
                            if r["loai"] else "chưa ghi Loại web")
         else:
             cur = _sheet_current_preset(d, cfg, st)
+            if cur and cur != r["preset"]:
+                # Xac nhan bang check moi: status da luu co the cu (record
+                # da doi tay/ngoai Dashboard). Neu that ra da khop preset
+                # sheet thi khong dua vao hang cho nua.
+                try:
+                    fresh = check_domain(d, cfg, skip_nc=True)
+                    _save_check_result(st, d, fresh)
+                    cur = fresh.get("records_preset")
+                except Exception:
+                    pass
             if cur and cur != r["preset"]:
                 r["action"] = "review"
                 r["detail"] = f"đang dùng '{cur}', sheet muốn '{r['preset']}'"
@@ -1445,6 +1488,8 @@ def sheet_setup_clean(cfg, st):
     rows, err, _src = sheet_read_rows(cfg)
     if err:
         return {"ok": False, "error": err}
+    # Tu xoa khoi hang cho nhung muc ma record that da khop preset sheet.
+    _sheet_prune_review(cfg, st)
     rows = _sheet_classify(rows, cfg, st)
     results, queued = [], []
     review = cfg.setdefault("sheet_review", [])
@@ -2421,10 +2466,13 @@ class Handler(BaseHTTPRequestHandler):
                              "loai": r["loai"]}
                         if q not in review:
                             review.append(q)
+                # Tu xoa khoi hang cho nhung muc ma record that da khop
+                # preset sheet (vd record da doi tay truoc do).
+                pruned = _sheet_prune_review(cfg, st)
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": True, "rows": rows, "review": review,
-                            "source": src})
+                            "pruned": pruned, "source": src})
             elif path == "/api/sheet-setup":
                 # Setup tuan tu tung dong clean (xong 1 moi qua dong sau).
                 if not SHEET_LOCK.acquire(blocking=False):

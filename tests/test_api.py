@@ -1497,6 +1497,52 @@ def main():
     finally:
         dash.sheet_write_status = _real_write50
     print("  OK", flush=True)
+    print("TEST 51: Sheet — hang cho duyet tu xoa muc ma record that da khop preset sheet (status cu sai)...", flush=True)
+    cfg51 = dict(cfg)
+    cfg51["presets"] = {
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "203.0.113.10", "proxied": True},
+                        {"type": "A", "name": "www", "content": "203.0.113.10", "proxied": True}],
+        "Web Anh Long": [{"type": "CNAME", "name": "@", "content": "stores.shophost.com", "proxied": True}],
+    }
+    cfg51["default_preset"] = "Web Chị Hân"
+    cfg51["sheet_review"] = []
+    cfg51["sheet_ignored"] = []
+    # prune51.com: record THAT la Web Anh Long (CNAME -> stores.shophost.com)
+    # nhung status da luu (cu) van ghi Web Chi Han — giong avirora.com.
+    z51, _c = cf.get_or_create_zone("prune51.com")
+    cf.create_record(z51["id"], "CNAME", "prune51.com", "stores.shophost.com", True)
+    st51 = {"prune51.com": {"domain": "prune51.com", "zone": z51["id"],
+                            "records_preset": "Web Chị Hân", "records_ok": True,
+                            "records": [{"type": "A", "name": "prune51.com",
+                                         "content": "203.0.113.10"}]}}
+    cfg51["sheet_review"] = [{"domain": "prune51.com", "row": 1389,
+                              "preset": "Web Anh Long", "current": "Web Chị Hân",
+                              "loai": "Web Thuần Long"}]
+    # keep51.com: record that van la Web Chi Han, sheet muon Web Anh Long
+    # -> xung dot that, phai giu lai trong hang cho.
+    z51b, _c = cf.get_or_create_zone("keep51.com")
+    cf.create_record(z51b["id"], "A", "keep51.com", "203.0.113.10", True)
+    cf.create_record(z51b["id"], "A", "www.keep51.com", "203.0.113.10", True)
+    cfg51["sheet_review"].append({"domain": "keep51.com", "row": 1396,
+                                 "preset": "Web Anh Long", "current": "Web Chị Hân",
+                                 "loai": "Web Thuần Long"})
+    pruned51 = dash._sheet_prune_review(cfg51, st51)
+    assert pruned51 == ["prune51.com"], pruned51
+    assert [q["domain"] for q in cfg51["sheet_review"]] == ["keep51.com"], cfg51["sheet_review"]
+    # Status da luu cua prune51.com duoc cap nhat theo record that.
+    assert st51["prune51.com"]["records_preset"] == "Web Anh Long", st51["prune51.com"]
+    # _sheet_classify: dong prune51.com (sheet muon Web Anh Long) khong
+    # con bi dua vao hang cho nua du status cu sai — check moi xac nhan.
+    st51c = {"prune51.com": {"domain": "prune51.com", "zone": z51["id"],
+                             "records_preset": "Web Chị Hân", "records_ok": True,
+                             "records": [{"type": "A", "name": "prune51.com",
+                                          "content": "203.0.113.10"}]}}
+    rows51 = dash._sheet_classify(
+        [{"row": 1389, "domain": "prune51.com", "loai": "Web Thuần Long",
+          "status_j": "Cần setup", "note_l": ""}], cfg51, st51c)
+    assert rows51[0]["action"] == "setup", rows51[0]
+    assert rows51[0]["action"] != "review", rows51[0]
+    print("  OK", flush=True)
     print("TEST 47: chrome_autorenew local + _list_chrome_profiles — doc Local State, fallback quet thu muc...", flush=True)
     import app as dash_app
     from store import BASE_DIR as DASH_BASE

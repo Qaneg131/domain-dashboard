@@ -914,7 +914,9 @@ async function readSheet(quiet) {
   const nSetup = SHEET_ROWS.filter(r => r.action === 'setup').length;
   const nReview = SHEET_ROWS.filter(r => r.action === 'review').length;
   const src = res.source === 'api' ? 'Sheets API (live)' : 'link CSV publish (có thể chậm vài phút so với sheet)';
-  if (!quiet) document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.`;
+  const pruned = res.pruned || [];
+  if (!quiet) document.getElementById('sheetMsg').textContent = `Đọc xong qua ${src}: ${SHEET_ROWS.length} dòng — ${nSetup} sẽ setup, ${nReview} chờ duyệt.` +
+    (pruned.length ? ` Đã tự bỏ khỏi hàng chờ (preset đã khớp sheet): ${pruned.join(', ')}.` : '');
   if (res.review) STATE.config.sheet_review = res.review;
   renderSheetResults();
   renderSheetStats();
