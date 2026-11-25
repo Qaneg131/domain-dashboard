@@ -390,7 +390,7 @@
   <div id="viewMail" style="display:none">
   <div class="card">
     <h2>Check mail — mail của các domain Pass</h2>
-    <p class="hint">Đọc từ 2 sheet xuất bản: Sheet 1 lọc domain có cột H = <b>Pass</b> (cột C là tên domain), Sheet 2 lấy mail theo cột Domain (cột G). Chỉ hiện mail thuộc domain Pass. Mật khẩu và Mã 2FA mặc định che kín — bấm nút mắt mới hiện, nút copy chép đúng giá trị gốc kể cả khi đang che. Ghi chú chỉ lưu trong app, không ghi ngược vào Google Sheet.</p>
+    <p class="hint">Đọc từ 2 sheet xuất bản: Sheet 1 lọc domain có cột H = <b>Pass</b> (cột C là tên domain), Sheet 2 lấy mail theo cột Domain (cột G). Chỉ hiện mail thuộc domain Pass. Mỗi mail là 1 hàng riêng — 1 domain có nhiều mail thì hiện nhiều hàng. Mật khẩu và Mã 2FA mặc định che kín — nút mắt luôn hiện, bấm mới hiện giá trị thật, bấm lại thì che đi; nút copy chép đúng giá trị gốc kể cả khi đang che. Bộ lọc Mail VRF đọc các giá trị có thật trong cột E của sheet nên sau này thêm giá trị mới sẽ tự hiện thêm. Ghi chú chỉ lưu trong app, không ghi ngược vào Google Sheet.</p>
     <div class="mailwarn">Cảnh báo: 2 Google Sheet nguồn đang ở chế độ publish công khai (ai có link cũng đọc được), nên không chia sẻ link của ứng dụng này cho người ngoài.</div>
     <div class="row" style="margin-top:8px">
       <label>Link sheet 1 (domain)</label>
@@ -429,6 +429,8 @@
         <option value="yes">Có mail khôi phục</option>
         <option value="no">Chưa có</option>
       </select>
+      <label>Mail VRF</label>
+      <select id="mailVrfFilter"><option value="all">Tất cả</option></select>
       <label>Ghi chú</label>
       <select id="mailNoteFilter">
         <option value="all">Tất cả</option>
@@ -441,9 +443,9 @@
       <table id="mailTable">
         <thead><tr>
           <th>Domain</th><th>Mail</th><th>Mật khẩu</th><th>Mã 2FA</th>
-          <th>Mail khôi phục</th><th>Cột I</th><th>Cột J</th><th>Ghi chú</th>
+          <th>Mail khôi phục</th><th>Mail VRF</th><th>Cột I</th><th>Cột J</th><th>Ghi chú</th>
         </tr></thead>
-        <tbody id="mailTbody"><tr><td colspan="8" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr></tbody>
+        <tbody id="mailTbody"><tr><td colspan="9" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1426,6 +1428,7 @@ async function loadMailCheck(force) {
     if (msg) msg.textContent = `Đã tải: ${res.data.counts.pass} domain Pass, ${res.data.counts.mails} mail.`;
     renderMailOverview();
     renderMailDomainFilter();
+    renderMailVrfFilter();
     renderMailTable();
   } catch (e) {
     if (msg) msg.textContent = 'Không tải được sheet Check mail.';
@@ -1451,6 +1454,20 @@ function renderMailDomainFilter() {
     domains.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
   if (domains.includes(cur)) sel.value = cur;
 }
+// Bo loc Mail VRF (cot E Sheet 2): doc cac gia tri co that trong du
+// lieu tai ve roi lam lua chon — sau nay them gia tri moi o cot E thi
+// tu hien them, khong can sua code.
+function renderMailVrfFilter() {
+  const sel = document.getElementById('mailVrfFilter');
+  if (!sel || !MAIL_DATA) return;
+  const cur = sel.value;
+  const vals = [...new Set(MAIL_DATA.mails.map(m => m.mail_vrf || '').filter(Boolean))].sort();
+  sel.innerHTML = '<option value="all">Tất cả</option>' +
+    '<option value="__empty__">Chưa có</option>' +
+    vals.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if (cur === 'all' || cur === '__empty__' || vals.includes(cur)) sel.value = cur;
+  else sel.value = 'all';
+}
 function mailRowMatches(m) {
   const q = (document.getElementById('mailSearch').value || '').trim().toLowerCase();
   if (q && !m.domain.toLowerCase().includes(q) && !m.mail.toLowerCase().includes(q)) return false;
@@ -1464,18 +1481,25 @@ function mailRowMatches(m) {
   if (!has('mailPwFilter', m.password)) return false;
   if (!has('mailTfaFilter', m.tfa)) return false;
   if (!has('mailRecFilter', m.recovery)) return false;
+  const vrf = document.getElementById('mailVrfFilter').value;
+  if (vrf !== 'all') {
+    if (vrf === '__empty__') { if (m.mail_vrf) return false; }
+    else if (m.mail_vrf !== vrf) return false;
+  }
   if (!has('mailNoteFilter', m.note)) return false;
   return true;
 }
 function mailCell(value, opts) {
   opts = opts || {};
   const v = value || '';
-  if (!v) return '<span class="muted">—</span>';
+  // Nut mat luon hien o cot Mat khau / Ma 2FA, ke ca khi o dang trong
+  // (bam thi khong co gi de hien, nhung nut khong bao gio bien mat).
+  const eye = opts.secret
+    ? `<button class="iconbtn" title="${opts.secretKey && MAIL_SHOWN.has(opts.secretKey) ? 'Ẩn đi' : 'Hiện giá trị'}" onclick="toggleMailSecret('${opts.secretKey || ''}', this)">${opts.secretKey && MAIL_SHOWN.has(opts.secretKey) ? '🙈' : '👁'}</button>` : '';
+  if (!v) return '<span class="muted">—</span>' + eye;
   const key = opts.secretKey || '';
   const shown = key && MAIL_SHOWN.has(key);
   const text = opts.secret && !shown ? '••••••••' : esc(v);
-  const eye = opts.secret
-    ? `<button class="iconbtn" title="${shown ? 'Ẩn đi' : 'Hiện giá trị'}" onclick="toggleMailSecret('${key}', this)">${shown ? '🙈' : '👁'}</button>` : '';
   const copy = `<button class="iconbtn" title="Copy" onclick="copyMailValue(this, '${esc(v).replace(/'/g, "\\'")}')">⧉</button>`;
   const cls = opts.wrap ? 'cellval wrap' : 'cellval';
   return `<span class="${cls}">${text}</span>${eye}${copy}`;
@@ -1508,12 +1532,12 @@ function renderMailTable() {
   const tb = document.getElementById('mailTbody');
   if (!tb) return;
   if (!MAIL_DATA) {
-    tb.innerHTML = '<tr><td colspan="8" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr>';
+    tb.innerHTML = '<tr><td colspan="9" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr>';
     return;
   }
   const rows = MAIL_DATA.mails.filter(mailRowMatches);
   if (!rows.length) {
-    tb.innerHTML = `<tr><td colspan="8" class="muted">Không có mail nào khớp bộ lọc (đang lọc: ${MAIL_DATA.mails.length} mail).</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="9" class="muted">Không có mail nào khớp bộ lọc (đang lọc: ${MAIL_DATA.mails.length} mail).</td></tr>`;
     return;
   }
   tb.innerHTML = rows.map((m, i) => {
@@ -1525,13 +1549,14 @@ function renderMailTable() {
       `<td>${mailCell(m.password, { secret: true, secretKey: pwKey })}</td>` +
       `<td>${mailCell(m.tfa, { secret: true, secretKey: tfaKey })}</td>` +
       `<td>${mailCell(m.recovery, { wrap: true })}</td>` +
+      `<td>${mailCell(m.mail_vrf, { wrap: true })}</td>` +
       `<td>${mailCell(m.col_i, { wrap: true })}</td>` +
       `<td>${mailCell(m.col_j, { wrap: true })}</td>` +
       `<td><input type="text" class="note-in" id="mail-note-${i}" value="${esc(m.note || '')}" placeholder="ghi chú…">` +
       `<button class="iconbtn" onclick="saveMailNote(${i}, this)">Lưu</button></td>` +
       `</tr>`;
   }).join('') +
-  `<tr><td colspan="8" class="muted">Đang hiện ${rows.length}/${MAIL_DATA.mails.length} mail.</td></tr>`;
+  `<tr><td colspan="9" class="muted">Đang hiện ${rows.length}/${MAIL_DATA.mails.length} mail.</td></tr>`;
 }
 async function saveMailNote(i, btn) {
   if (!MAIL_DATA) return;
@@ -1557,6 +1582,7 @@ function clearMailFilters() {
   document.getElementById('mailPwFilter').value = 'all';
   document.getElementById('mailTfaFilter').value = 'all';
   document.getElementById('mailRecFilter').value = 'all';
+  document.getElementById('mailVrfFilter').value = 'all';
   document.getElementById('mailNoteFilter').value = 'all';
   renderMailTable();
 }
@@ -2413,7 +2439,7 @@ refresh().then(() => {
     clearTimeout(MAIL_TIMER);
     MAIL_TIMER = setTimeout(renderMailTable, 300);
   });
-  ['mailDomainFilter', 'mailPwFilter', 'mailTfaFilter', 'mailRecFilter', 'mailNoteFilter'].forEach(id => {
+  ['mailDomainFilter', 'mailPwFilter', 'mailTfaFilter', 'mailRecFilter', 'mailVrfFilter', 'mailNoteFilter'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', renderMailTable);
   });

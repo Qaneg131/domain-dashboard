@@ -389,8 +389,8 @@ def main():
     mail2 = os.path.join(fake_dir, "mail2.csv")
     with open(mail2, "w", encoding="utf-8") as f:
         f.write("Mail,Mật Khẩu,Mã 2FA,MAIL KHÔI PHỤC,Mail VRF,Người Lấy,Domain,,,Cột J\n"
-                "a@passa.com,Secret1,2fa111,rec@x.com,,,passa.com,,i1,j1\n"
-                "b@passa.com PassB2,,2fa222,,,,passa.com,,i2,\n"
+                "a@passa.com,Secret1,2fa111,rec@x.com,Pass,,passa.com,,i1,j1\n"
+                "b@passa.com PassB2,,2fa222,,Fail,,passa.com,,i2,\n"
                 "c@passb.com,Secret3,,,,,passb.com,,,\n"
                 "e@passd.com,Secret5,,,,,HTTPS://WWW.passd.com/inbox,,,\n")
     call("POST", "/api/settings", {"mail_sheet1_csv_url": "file://" + mail1,
@@ -405,6 +405,9 @@ def main():
     assert by_mail["a@passa.com"]["password"] == "Secret1"
     assert by_mail["a@passa.com"]["tfa"] == "2fa111"
     assert by_mail["a@passa.com"]["recovery"] == "rec@x.com"
+    assert by_mail["a@passa.com"]["mail_vrf"] == "Pass"
+    assert by_mail["b@passa.com"]["mail_vrf"] == "Fail"
+    assert by_mail["e@passd.com"]["mail_vrf"] == ""
     assert by_mail["a@passa.com"]["col_i"] == "i1" and by_mail["a@passa.com"]["col_j"] == "j1"
     # Dong ghep 'mail pass' trong cot A: tach thanh mail + mat khau.
     assert by_mail["b@passa.com"]["password"] == "PassB2", by_mail["b@passa.com"]

@@ -311,8 +311,8 @@ def _fetch_mail_check(cfg, force=False):
                 pass_set.add(d)
                 pass_domains.append(d)
         # Sheet 2: A = Mail, B = Mat khau, C = Ma 2FA, D = Mail khoi
-        # phuc, G = Domain, I/J = du lieu phu. Chi giu mail thuoc
-        # domain Pass.
+        # phuc, E = Mail VRF, G = Domain, I/J = du lieu phu. Chi giu mail
+        # thuoc domain Pass.
         notes = cfg.get("mail_notes") or {}
         mails, matched = [], set()
         for row in _fetch_csv_rows(url2)[1:]:
@@ -330,6 +330,7 @@ def _fetch_mail_check(cfg, force=False):
                 "password": password,
                 "tfa": (row[2] or "").strip() if len(row) > 2 else "",
                 "recovery": (row[3] or "").strip() if len(row) > 3 else "",
+                "mail_vrf": (row[4] or "").strip() if len(row) > 4 else "",
                 "col_i": (row[8] or "").strip() if len(row) > 8 else "",
                 "col_j": (row[9] or "").strip() if len(row) > 9 else "",
                 "note": notes.get(mail.lower(), ""),
