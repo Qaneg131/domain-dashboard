@@ -91,6 +91,16 @@ DEFAULT_CONFIG = {
     # xuat ban, chi doc de hien o tab Auto-renew. Cot B = WEB (domain),
     # cot F = Tinh Trang Sus. De trong = khong hien tinh trang Sus.
     "sus_sheet_csv_url": "",
+    # Check mail: 2 link sheet xuat ban (KHAC sheet Sus va sheet set
+    # domain). Sheet 1: cot C = domain, cot H = trang thai (chi lay
+    # 'Pass'). Sheet 2: A = Mail, B = Mat khau, C = Ma 2FA, D = Mail
+    # khoi phuc, G = Domain (de noi), I/J = du lieu phu. De trong =
+    # chua cau hinh. Link chi luu local (config.json), khong commit.
+    "mail_sheet1_csv_url": "",
+    "mail_sheet2_csv_url": "",
+    # Ghi chu Check mail: {mail_lower: ghi_chu}. Chi luu trong app,
+    # khong ghi nguoc vao Google Sheet.
+    "mail_notes": {},
 }
 
 

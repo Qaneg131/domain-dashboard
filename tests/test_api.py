@@ -1441,6 +1441,62 @@ def main():
     assert ar_map["ar2.com"] is False, ar_map
     print("  OK", flush=True)
 
+    print("TEST 50: Sheet — domain da setup day du thi chi cap nhat cot J, khong chay setup lai...", flush=True)
+    cfg50 = dict(cfg)
+    cfg50["presets"] = {
+        "Web Chị Hân": [{"type": "A", "name": "@", "content": "203.0.113.10", "proxied": True},
+                        {"type": "A", "name": "www", "content": "203.0.113.10", "proxied": True}],
+    }
+    cfg50["default_preset"] = "Web Chị Hân"
+    cfg50["email_preset"] = {"enabled": True, "rules": [
+        {"match": "info@", "to": "owner@gmail.com"},
+        {"match": "*", "to": "owner@gmail.com"}]}
+    cfg50["https_preset"] = {"enabled": True, "ssl": "flexible", "always_https": "on",
+                             "min_tls_version": "1.2", "rewrites": "on"}
+    cfg50["sheet_review"] = []
+    cfg50["sheet_ignored"] = []
+    # done50.com: zone + record khop preset + email bat + HTTPS khop
+    # preset (flexible/on) -> da setup day du.
+    z50, _c = cf.get_or_create_zone("done50.com")
+    cf.create_record(z50["id"], "A", "done50.com", "203.0.113.10", True)
+    cf.create_record(z50["id"], "A", "www.done50.com", "203.0.113.10", True)
+    cf.enable_email_routing(z50["id"])
+    cf.set_https(z50["id"], ssl="flexible", always_https="on")
+    st50 = {}
+    dash._save_check_result(st50, "done50.com",
+                            dash.check_domain("done50.com", cfg50, skip_nc=True))
+    assert dash._sheet_is_fully_setup("done50.com", "Web Chị Hân", cfg50, st50) is True, st50
+    # notdone50.com: record khop preset NHUNG email chua bat -> chua du.
+    z50b, _c = cf.get_or_create_zone("notdone50.com")
+    cf.create_record(z50b["id"], "A", "notdone50.com", "203.0.113.10", True)
+    cf.create_record(z50b["id"], "A", "www.notdone50.com", "203.0.113.10", True)
+    st50b = {}
+    dash._save_check_result(st50b, "notdone50.com",
+                            dash.check_domain("notdone50.com", cfg50, skip_nc=True))
+    assert dash._sheet_is_fully_setup("notdone50.com", "Web Chị Hân", cfg50, st50b) is False, st50b
+    # _sheet_setup_one: done50.com chi ghi cot J, khong tao them record nao.
+    written50 = []
+    _real_write50 = dash.sheet_write_status
+    def fake_write50(row, value, cfg):
+        written50.append((row, value))
+        return True, "ok"
+    dash.sheet_write_status = fake_write50
+    try:
+        nrec_before = len(cf.list_records(z50["id"]))
+        one50 = dash._sheet_setup_one("done50.com", 1402, "Web Chị Hân", cfg50, st50)
+        assert one50["action"] == "done", one50
+        assert "chỉ cập nhật cột J" in one50["detail"], one50
+        assert written50 == [(1402, "Đã set up")], written50
+        assert len(cf.list_records(z50["id"])) == nrec_before, "khong duoc tao them record"
+        # notdone50.com: chay setup that (bat email) roi moi ghi cot J.
+        written50.clear()
+        one50b = dash._sheet_setup_one("notdone50.com", 1403, "Web Chị Hân", cfg50, st50b)
+        assert one50b["action"] == "done" and "setup xong" in one50b["detail"], one50b
+        assert written50 == [(1403, "Đã set up")], written50
+        assert cf.get_email_routing(z50b["id"])["enabled"] is True
+    finally:
+        dash.sheet_write_status = _real_write50
+    print("  OK", flush=True)
     print("TEST 47: chrome_autorenew local + _list_chrome_profiles — doc Local State, fallback quet thu muc...", flush=True)
     import app as dash_app
     from store import BASE_DIR as DASH_BASE

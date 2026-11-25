@@ -72,6 +72,23 @@
   .tbl th { background: #f5f2ed; }
   .tbl tbody tr:hover { background: #fdf6ec; }
   .tbl td .small { margin-left: 6px; }
+  /* Bang Check mail: cuon 2 chieu trong khung rieng, header ghim tren,
+     cot Domain ghim trai. O trong + nut mat/copy nho gon. */
+  .mailwrap { border: 1px solid #e8e1d5; border-radius: 10px; overflow: auto; max-height: 70vh; background: #fffdf9; }
+  .mailwrap table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
+  .mailwrap th, .mailwrap td { padding: 8px 10px; border-bottom: 1px solid #efe9dd; text-align: left; vertical-align: middle; white-space: nowrap; background: #fffdf9; }
+  .mailwrap thead th { position: sticky; top: 0; z-index: 2; background: #f5f2ed; font-weight: 700; }
+  .mailwrap th:first-child, .mailwrap td:first-child { position: sticky; left: 0; z-index: 1; font-weight: 600; }
+  .mailwrap thead th:first-child { z-index: 3; background: #f5f2ed; }
+  .mailwrap tbody tr:hover td { background: #fdf6ec; }
+  .mailwrap tbody tr:hover td:first-child { background: #fdf6ec; }
+  .mailwrap td .cellval { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  .mailwrap td .cellval.wrap { white-space: normal; word-break: break-all; }
+  .mailwrap input.note-in { min-width: 160px; padding: 6px 8px; font-size: 13px; }
+  button.iconbtn { padding: 4px 8px; font-size: 13px; background: #fff; color: #16130f; border: 1px solid #d8d0c2; border-radius: 6px; margin-left: 4px; }
+  button.iconbtn:hover { background: #f5f2ed; border-color: #16130f; }
+  button.iconbtn.done { background: #dcf2e3; border-color: #2e7d32; color: #137333; }
+  .mailwarn { background: #fff3cd; border: 1px solid #e8c96a; color: #7a5b00; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 13px; }
   /* Thanh thao tac hang loat: noi bat khi co domain duoc chon, nut nguy hiem tach rieng ben phai. */
   .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: #f5f2ed; border: 1px solid #e8e1d5; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .bulkbar.has-sel { background: #fdf6ec; border-color: #cf9a5f; }
@@ -115,6 +132,7 @@
     <div class="nav">
       <button class="nav-item active" id="navMain" onclick="showView('main')">Quản lý domain</button>
       <button class="nav-item" id="navAr" onclick="showView('ar')">Auto-renew</button>
+      <button class="nav-item" id="navMail" onclick="showView('mail')">Check mail</button>
     </div>
   </nav>
 <main>
@@ -369,6 +387,68 @@
   </div>
   </div>
 
+  <div id="viewMail" style="display:none">
+  <div class="card">
+    <h2>Check mail — mail của các domain Pass</h2>
+    <p class="hint">Đọc từ 2 sheet xuất bản: Sheet 1 lọc domain có cột H = <b>Pass</b> (cột C là tên domain), Sheet 2 lấy mail theo cột Domain (cột G). Chỉ hiện mail thuộc domain Pass. Mật khẩu và Mã 2FA mặc định che kín — bấm nút mắt mới hiện, nút copy chép đúng giá trị gốc kể cả khi đang che. Ghi chú chỉ lưu trong app, không ghi ngược vào Google Sheet.</p>
+    <div class="mailwarn">Cảnh báo: 2 Google Sheet nguồn đang ở chế độ publish công khai (ai có link cũng đọc được), nên không chia sẻ link của ứng dụng này cho người ngoài.</div>
+    <div class="row" style="margin-top:8px">
+      <label>Link sheet 1 (domain)</label>
+      <input type="text" id="mailSheet1Url" placeholder="dán link pubhtml của sheet danh sách domain (cột C domain, cột H = Pass)">
+    </div>
+    <div class="row">
+      <label>Link sheet 2 (mail)</label>
+      <input type="text" id="mailSheet2Url" placeholder="dán link pubhtml của sheet danh sách mail (cột A mail, cột G domain)">
+    </div>
+    <div class="row">
+      <button onclick="saveMailSheetUrls()">Lưu link</button>
+      <button onclick="loadMailCheck(true)">Tải lại từ 2 sheet</button>
+      <span class="muted" id="mailMsg"></span>
+    </div>
+    <div id="mailOverview" style="margin-top:12px"></div>
+    <div class="row" style="margin-top:8px">
+      <label>Tìm</label>
+      <input type="text" id="mailSearch" placeholder="lọc theo domain hoặc địa chỉ mail…">
+      <label>Domain</label>
+      <select id="mailDomainFilter"><option value="all">Tất cả domain</option></select>
+      <label>Mật khẩu</label>
+      <select id="mailPwFilter">
+        <option value="all">Tất cả</option>
+        <option value="yes">Có mật khẩu</option>
+        <option value="no">Chưa có</option>
+      </select>
+      <label>Mã 2FA</label>
+      <select id="mailTfaFilter">
+        <option value="all">Tất cả</option>
+        <option value="yes">Có mã 2FA</option>
+        <option value="no">Chưa có</option>
+      </select>
+      <label>Mail khôi phục</label>
+      <select id="mailRecFilter">
+        <option value="all">Tất cả</option>
+        <option value="yes">Có mail khôi phục</option>
+        <option value="no">Chưa có</option>
+      </select>
+      <label>Ghi chú</label>
+      <select id="mailNoteFilter">
+        <option value="all">Tất cả</option>
+        <option value="yes">Đã có ghi chú</option>
+        <option value="no">Chưa có ghi chú</option>
+      </select>
+      <button class="secondary" onclick="clearMailFilters()">Xóa lọc</button>
+    </div>
+    <div class="mailwrap" style="margin-top:8px">
+      <table id="mailTable">
+        <thead><tr>
+          <th>Domain</th><th>Mail</th><th>Mật khẩu</th><th>Mã 2FA</th>
+          <th>Mail khôi phục</th><th>Cột I</th><th>Cột J</th><th>Ghi chú</th>
+        </tr></thead>
+        <tbody id="mailTbody"><tr><td colspan="8" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
   <div class="card">
     <h2>Kết quả chạy</h2>
     <div id="diagnosisBox"></div>
@@ -542,17 +622,19 @@ function showDiagnosis(results) {
   box.innerHTML = items.map(it => `<div class="diag"><div class="err">✗ ${esc(it.domain || '')}: ${esc(it.error)}</div><div class="fix">✓ Cách sửa: ${esc(it.fix)}</div></div>`).join('');
 }
 // ---------------------------------------------------------------- tab sidebar
-// Sidebar co 2 tab: "Quan ly domain" (toan bo card cu) va "Auto-renew"
-// (chi card Auto-renew). Card "Ket qua chay" nam ngoai ca 2 tab nen
-// luon hien — log cua Auto-renew cung hien o do.
+// Sidebar co 3 tab: "Quan ly domain" (toan bo card cu), "Auto-renew"
+// (chi card Auto-renew) va "Check mail" (chi card Check mail). Card
+// "Ket qua chay" nam ngoai ca 3 tab nen luon hien.
 function showView(name) {
   const main = document.getElementById('viewMain');
   const ar = document.getElementById('viewAr');
-  const isAr = name === 'ar';
-  if (main) main.style.display = isAr ? 'none' : '';
-  if (ar) ar.style.display = isAr ? '' : 'none';
-  document.getElementById('navMain').classList.toggle('active', !isAr);
-  document.getElementById('navAr').classList.toggle('active', isAr);
+  const mail = document.getElementById('viewMail');
+  if (main) main.style.display = name === 'main' ? '' : 'none';
+  if (ar) ar.style.display = name === 'ar' ? '' : 'none';
+  if (mail) mail.style.display = name === 'mail' ? '' : 'none';
+  document.getElementById('navMain').classList.toggle('active', name === 'main');
+  document.getElementById('navAr').classList.toggle('active', name === 'ar');
+  document.getElementById('navMail').classList.toggle('active', name === 'mail');
 }
 
 function api(path, body) {
@@ -1302,6 +1384,181 @@ async function saveSusSheetUrl() {
   STATE.config.sus_sheet_csv_url = v;
   SUS_MAP = {}; SUS_LOADED = false;
   await loadSusStatus(true);
+}
+
+// ---------------- Check mail ----------------
+// Doc 2 sheet xuat ban: Sheet 1 loc domain Pass (cot H), Sheet 2 lay
+// mail theo cot Domain (cot G). Bang 8 cot, header + cot Domain ghim
+// co dinh, mat khau/2FA che mac dinh, copy tung o, ghi chu luu trong
+// app. Bo loc: tim (domain/mail) + domain + co/chua mat khau, 2FA,
+// mail khoi phuc, ghi chu.
+let MAIL_DATA = null;
+let MAIL_SHOWN = new Set();  // key "pw:<mail>" / "tfa:<mail>" dang hien ro
+let MAIL_TIMER = null;
+
+async function saveMailSheetUrls() {
+  const u1 = document.getElementById('mailSheet1Url').value.trim();
+  const u2 = document.getElementById('mailSheet2Url').value.trim();
+  await api('/api/settings', { mail_sheet1_csv_url: u1, mail_sheet2_csv_url: u2 });
+  STATE.config.mail_sheet1_csv_url = u1;
+  STATE.config.mail_sheet2_csv_url = u2;
+  MAIL_DATA = null;
+  await loadMailCheck(true);
+}
+async function loadMailCheck(force) {
+  const msg = document.getElementById('mailMsg');
+  const u1 = document.getElementById('mailSheet1Url');
+  const u2 = document.getElementById('mailSheet2Url');
+  if (u1 && !u1.value) u1.value = (STATE.config || {}).mail_sheet1_csv_url || '';
+  if (u2 && !u2.value) u2.value = (STATE.config || {}).mail_sheet2_csv_url || '';
+  if (!u1.value.trim() || !u2.value.trim()) {
+    if (msg) msg.textContent = 'Chưa nhập đủ 2 link sheet — dán link rồi bấm Lưu link.';
+    return;
+  }
+  if (msg) msg.textContent = 'Đang tải từ 2 sheet…';
+  try {
+    const res = await api('/api/mail-check' + (force ? '?force=1' : ''));
+    if (!res.ok) {
+      if (msg) msg.textContent = res.error || 'Không tải được sheet Check mail.';
+      return;
+    }
+    MAIL_DATA = res.data;
+    if (msg) msg.textContent = `Đã tải: ${res.data.counts.pass} domain Pass, ${res.data.counts.mails} mail.`;
+    renderMailOverview();
+    renderMailDomainFilter();
+    renderMailTable();
+  } catch (e) {
+    if (msg) msg.textContent = 'Không tải được sheet Check mail.';
+  }
+}
+function renderMailOverview() {
+  const box = document.getElementById('mailOverview');
+  if (!box) return;
+  if (!MAIL_DATA) { box.innerHTML = ''; return; }
+  const c = MAIL_DATA.counts;
+  const noMail = MAIL_DATA.no_mail || [];
+  box.innerHTML = `<span class="stat">Tổng ${c.pass} domain Pass</span> ` +
+    `<span class="stat">Đã khớp có mail: ${c.matched}</span> ` +
+    `<span class="stat">Tổng ${c.mails} mail</span>` +
+    (noMail.length ? `<div class="muted" style="margin-top:6px">${noMail.length} domain Pass chưa có mail: <b>${noMail.map(esc).join(', ')}</b></div>` : '');
+}
+function renderMailDomainFilter() {
+  const sel = document.getElementById('mailDomainFilter');
+  if (!sel || !MAIL_DATA) return;
+  const cur = sel.value;
+  const domains = [...new Set(MAIL_DATA.mails.map(m => m.domain))].sort();
+  sel.innerHTML = '<option value="all">Tất cả domain</option>' +
+    domains.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  if (domains.includes(cur)) sel.value = cur;
+}
+function mailRowMatches(m) {
+  const q = (document.getElementById('mailSearch').value || '').trim().toLowerCase();
+  if (q && !m.domain.toLowerCase().includes(q) && !m.mail.toLowerCase().includes(q)) return false;
+  const dom = document.getElementById('mailDomainFilter').value;
+  if (dom !== 'all' && m.domain !== dom) return false;
+  const has = (selId, val) => {
+    const v = document.getElementById(selId).value;
+    if (v === 'all') return true;
+    return v === 'yes' ? !!val : !val;
+  };
+  if (!has('mailPwFilter', m.password)) return false;
+  if (!has('mailTfaFilter', m.tfa)) return false;
+  if (!has('mailRecFilter', m.recovery)) return false;
+  if (!has('mailNoteFilter', m.note)) return false;
+  return true;
+}
+function mailCell(value, opts) {
+  opts = opts || {};
+  const v = value || '';
+  if (!v) return '<span class="muted">—</span>';
+  const key = opts.secretKey || '';
+  const shown = key && MAIL_SHOWN.has(key);
+  const text = opts.secret && !shown ? '••••••••' : esc(v);
+  const eye = opts.secret
+    ? `<button class="iconbtn" title="${shown ? 'Ẩn đi' : 'Hiện giá trị'}" onclick="toggleMailSecret('${key}', this)">${shown ? '🙈' : '👁'}</button>` : '';
+  const copy = `<button class="iconbtn" title="Copy" onclick="copyMailValue(this, '${esc(v).replace(/'/g, "\\'")}')">⧉</button>`;
+  const cls = opts.wrap ? 'cellval wrap' : 'cellval';
+  return `<span class="${cls}">${text}</span>${eye}${copy}`;
+}
+function toggleMailSecret(key, btn) {
+  if (MAIL_SHOWN.has(key)) MAIL_SHOWN.delete(key); else MAIL_SHOWN.add(key);
+  renderMailTable();
+}
+async function copyMailValue(btn, value) {
+  const done = () => {
+    btn.classList.add('done');
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.classList.remove('done'); btn.textContent = old; }, 1200);
+  };
+  try {
+    await navigator.clipboard.writeText(value);
+    done();
+  } catch (e) {
+    // Fallback cho trinh duyet khong cho clipboard (khong co HTTPS).
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e2) {}
+    document.body.removeChild(ta);
+  }
+}
+function renderMailTable() {
+  const tb = document.getElementById('mailTbody');
+  if (!tb) return;
+  if (!MAIL_DATA) {
+    tb.innerHTML = '<tr><td colspan="8" class="muted">Chưa tải dữ liệu — nhập 2 link sheet rồi bấm “Tải lại từ 2 sheet”.</td></tr>';
+    return;
+  }
+  const rows = MAIL_DATA.mails.filter(mailRowMatches);
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="8" class="muted">Không có mail nào khớp bộ lọc (đang lọc: ${MAIL_DATA.mails.length} mail).</td></tr>`;
+    return;
+  }
+  tb.innerHTML = rows.map((m, i) => {
+    const pwKey = 'pw:' + m.mail.toLowerCase();
+    const tfaKey = 'tfa:' + m.mail.toLowerCase();
+    return `<tr>` +
+      `<td>${esc(m.domain)}</td>` +
+      `<td>${mailCell(m.mail, { wrap: true })}</td>` +
+      `<td>${mailCell(m.password, { secret: true, secretKey: pwKey })}</td>` +
+      `<td>${mailCell(m.tfa, { secret: true, secretKey: tfaKey })}</td>` +
+      `<td>${mailCell(m.recovery, { wrap: true })}</td>` +
+      `<td>${mailCell(m.col_i, { wrap: true })}</td>` +
+      `<td>${mailCell(m.col_j, { wrap: true })}</td>` +
+      `<td><input type="text" class="note-in" id="mail-note-${i}" value="${esc(m.note || '')}" placeholder="ghi chú…">` +
+      `<button class="iconbtn" onclick="saveMailNote(${i}, this)">Lưu</button></td>` +
+      `</tr>`;
+  }).join('') +
+  `<tr><td colspan="8" class="muted">Đang hiện ${rows.length}/${MAIL_DATA.mails.length} mail.</td></tr>`;
+}
+async function saveMailNote(i, btn) {
+  if (!MAIL_DATA) return;
+  const m = MAIL_DATA.mails.filter(mailRowMatches)[i];
+  if (!m) return;
+  const inp = document.getElementById('mail-note-' + i);
+  const note = inp ? inp.value : '';
+  btn.disabled = true;
+  const res = await api('/api/mail-note', { mail: m.mail, note });
+  btn.disabled = false;
+  if (res.ok) {
+    m.note = note;
+    btn.classList.add('done');
+    btn.textContent = '✓ Đã lưu';
+    setTimeout(() => { btn.classList.remove('done'); btn.textContent = 'Lưu'; }, 1500);
+  } else {
+    alert(res.error || 'Lưu ghi chú lỗi.');
+  }
+}
+function clearMailFilters() {
+  document.getElementById('mailSearch').value = '';
+  document.getElementById('mailDomainFilter').value = 'all';
+  document.getElementById('mailPwFilter').value = 'all';
+  document.getElementById('mailTfaFilter').value = 'all';
+  document.getElementById('mailRecFilter').value = 'all';
+  document.getElementById('mailNoteFilter').value = 'all';
+  renderMailTable();
 }
 async function openArNamecheap() {
   const msg = document.getElementById('arMsg');
@@ -2149,6 +2406,17 @@ refresh().then(() => {
   if (susAllArFilter) susAllArFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
   const susAllExpFilter = document.getElementById('susAllExpFilter');
   if (susAllExpFilter) susAllExpFilter.addEventListener('change', () => { SUS_ALL_PAGE = 1; renderSusAll(); });
+  // Check mail: tai ngay neu da nhap 2 link; tim/loc thi ve lai bang.
+  if (STATE.config && STATE.config.mail_sheet1_csv_url && STATE.config.mail_sheet2_csv_url) loadMailCheck();
+  const mailSearch = document.getElementById('mailSearch');
+  if (mailSearch) mailSearch.addEventListener('input', () => {
+    clearTimeout(MAIL_TIMER);
+    MAIL_TIMER = setTimeout(renderMailTable, 300);
+  });
+  ['mailDomainFilter', 'mailPwFilter', 'mailTfaFilter', 'mailRecFilter', 'mailNoteFilter'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', renderMailTable);
+  });
 });
 </script>
 </body>

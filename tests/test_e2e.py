@@ -376,6 +376,50 @@ def main():
     sus2 = call("GET", "/api/sus-status")
     assert not sus2["ok"] and "chua nhap link" in sus2.get("error", ""), sus2
     print("SUS-STATUS OK: doc CSV sheet Sus qua endpoint + bao loi khi chua nhap link", flush=True)
+    # Check mail: 2 CSV gia (file://) — Sheet 1 loc Pass (cot C domain,
+    # cot H), Sheet 2 join mail theo cot G (Domain). Ca 'mail pass'
+    # ghep trong cot A phai tach ra de che mat khau.
+    mail1 = os.path.join(fake_dir, "mail1.csv")
+    with open(mail1, "w", encoding="utf-8") as f:
+        f.write(",2FA,WEB,Ngay Reg,Add The,Verify,Verify2,Tinh Trang Sus\n"
+                "Web Hân,,passa.com,,,,,Pass\n"
+                "Web Hân,,passb.com,,,,,Fail\n"
+                "Web Long,,passc.com,,,,,Pass\n"
+                "Web Hân,,passd.com,,,,,Pass\n")
+    mail2 = os.path.join(fake_dir, "mail2.csv")
+    with open(mail2, "w", encoding="utf-8") as f:
+        f.write("Mail,Mật Khẩu,Mã 2FA,MAIL KHÔI PHỤC,Mail VRF,Người Lấy,Domain,,,Cột J\n"
+                "a@passa.com,Secret1,2fa111,rec@x.com,,,passa.com,,i1,j1\n"
+                "b@passa.com PassB2,,2fa222,,,,passa.com,,i2,\n"
+                "c@passb.com,Secret3,,,,,passb.com,,,\n"
+                "e@passd.com,Secret5,,,,,HTTPS://WWW.passd.com/inbox,,,\n")
+    call("POST", "/api/settings", {"mail_sheet1_csv_url": "file://" + mail1,
+                                   "mail_sheet2_csv_url": "file://" + mail2})
+    mc = call("GET", "/api/mail-check")
+    assert mc["ok"], mc
+    d = mc["data"]
+    assert d["counts"] == {"pass": 3, "matched": 2, "mails": 3}, d["counts"]
+    assert d["pass_domains"] == ["passa.com", "passc.com", "passd.com"], d
+    assert d["no_mail"] == ["passc.com"], d
+    by_mail = {m["mail"]: m for m in d["mails"]}
+    assert by_mail["a@passa.com"]["password"] == "Secret1"
+    assert by_mail["a@passa.com"]["tfa"] == "2fa111"
+    assert by_mail["a@passa.com"]["recovery"] == "rec@x.com"
+    assert by_mail["a@passa.com"]["col_i"] == "i1" and by_mail["a@passa.com"]["col_j"] == "j1"
+    # Dong ghep 'mail pass' trong cot A: tach thanh mail + mat khau.
+    assert by_mail["b@passa.com"]["password"] == "PassB2", by_mail["b@passa.com"]
+    # Domain chuan hoa (bo https://, www., duong dan) van join duoc.
+    assert "e@passd.com" in by_mail and by_mail["e@passd.com"]["domain"] == "passd.com"
+    # Ghi chu: luu vao app (khong ghi sheet), doc lai van con.
+    note = call("POST", "/api/mail-note", {"mail": "a@passa.com", "note": "mail chinh"})
+    assert note["ok"], note
+    mc2 = call("GET", "/api/mail-check?force=1")
+    assert mc2["ok"] and {m["mail"]: m for m in mc2["data"]["mails"]}["a@passa.com"]["note"] == "mail chinh", mc2
+    # Chua nhap link thi bao loi ro.
+    call("POST", "/api/settings", {"mail_sheet1_csv_url": "", "mail_sheet2_csv_url": ""})
+    mc3 = call("GET", "/api/mail-check?force=1")
+    assert not mc3["ok"] and "chua nhap" in mc3.get("error", ""), mc3
+    print("MAIL-CHECK OK: loc Pass + join mail + tach mail/pass ghep + chuan hoa domain + ghi chu luu trong app", flush=True)
     # Trang thai auto-renew: doc co AutoRenew tu getList (mock).
     # (E2E da set nc_user/key/IP + NC_API_BASE tro ve mock o tren.)
     ar = call("GET", "/api/autorenew-status")

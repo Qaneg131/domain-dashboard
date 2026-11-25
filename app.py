@@ -243,6 +243,113 @@ def _fetch_nc_list_info(cfg, force=False):
     return info, err
 
 
+# ------------------------------------------------- Check mail
+# Doc 2 sheet xuat ban: Sheet 1 (cot C = domain, cot H = trang thai,
+# chi lay 'Pass'), Sheet 2 (A = Mail, B = Mat khau, C = Ma 2FA,
+# D = Mail khoi phuc, G = Domain de noi, I/J = du lieu phu). Chi hien
+# mail thuoc domain Pass. Cache 5 phut theo URL.
+MAIL_CACHE = {"at": 0.0, "url1": "", "url2": "", "data": None, "error": ""}
+MAIL_CACHE_TTL_S = 300
+
+
+def _fetch_csv_rows(url):
+    """Tai 1 sheet CSV xuat ban ve list dong (list str)."""
+    import io
+    req = urllib.request.Request(url, headers={"User-Agent": "domain-dashboard"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        text = r.read().decode("utf-8-sig", errors="replace")
+    return list(csv.reader(io.StringIO(text)))
+
+
+def _norm_mail_domain(s):
+    """Chuan hoa domain de so khop: viet thuong, bo khoang trang,
+    bo https://, http://, www. va phan duong dan phia sau."""
+    import re
+    s = (s or "").strip().lower()
+    s = re.sub(r"^https?://", "", s)
+    s = re.sub(r"^www\.", "", s)
+    return s.split("/")[0].strip()
+
+
+def _split_mail_password(mail, password):
+    """Sheet 2 co 1 so dong ghep 'mail mat-khau' chung trong cot A
+    (cot B trong) — tach thanh (mail, mat_khau) de mat khau duoc che
+    dung cho. Neu cot B da co thi giu nguyen."""
+    mail = (mail or "").strip()
+    password = (password or "").strip()
+    if not password and " " in mail:
+        first, rest = mail.split(None, 1)
+        return first.strip(), rest.strip()
+    return mail, password
+
+
+def _fetch_mail_check(cfg, force=False):
+    """Doc 2 sheet Check mail -> (data, error). data = {pass_domains,
+    mails: [{domain, mail, password, tfa, recovery, col_i, col_j,
+    note}], no_mail: [domain Pass chua co mail], counts}. Ghi chu lay
+    tu cfg['mail_notes'] (chi luu trong app)."""
+    url1 = _sus_csv_url(cfg.get("mail_sheet1_csv_url") or "")
+    url2 = _sus_csv_url(cfg.get("mail_sheet2_csv_url") or "")
+    if not url1 or not url2:
+        return None, "chua nhap du 2 link sheet Check mail (o tab Check mail)"
+    now = time.time()
+    if (not force and MAIL_CACHE["data"] is not None
+            and MAIL_CACHE["url1"] == url1 and MAIL_CACHE["url2"] == url2
+            and now - MAIL_CACHE["at"] < MAIL_CACHE_TTL_S):
+        return MAIL_CACHE["data"], MAIL_CACHE["error"]
+    data, err = None, ""
+    try:
+        # Sheet 1: cot C = domain, cot H = trang thai (chi 'Pass').
+        pass_domains, pass_set = [], set()
+        for row in _fetch_csv_rows(url1)[1:]:
+            if len(row) < 8:
+                continue
+            if (row[7] or "").strip() != "Pass":
+                continue
+            d = _norm_mail_domain(row[2])
+            if d and "." in d and d not in pass_set:
+                pass_set.add(d)
+                pass_domains.append(d)
+        # Sheet 2: A = Mail, B = Mat khau, C = Ma 2FA, D = Mail khoi
+        # phuc, G = Domain, I/J = du lieu phu. Chi giu mail thuoc
+        # domain Pass.
+        notes = cfg.get("mail_notes") or {}
+        mails, matched = [], set()
+        for row in _fetch_csv_rows(url2)[1:]:
+            if len(row) < 7:
+                continue
+            d = _norm_mail_domain(row[6])
+            if not d or d not in pass_set:
+                continue
+            mail, password = _split_mail_password(row[0], row[1] if len(row) > 1 else "")
+            if not mail:
+                continue
+            mails.append({
+                "domain": d,
+                "mail": mail,
+                "password": password,
+                "tfa": (row[2] or "").strip() if len(row) > 2 else "",
+                "recovery": (row[3] or "").strip() if len(row) > 3 else "",
+                "col_i": (row[8] or "").strip() if len(row) > 8 else "",
+                "col_j": (row[9] or "").strip() if len(row) > 9 else "",
+                "note": notes.get(mail.lower(), ""),
+            })
+            matched.add(d)
+        mails.sort(key=lambda m: (m["domain"], m["mail"].lower()))
+        no_mail = [d for d in pass_domains if d not in matched]
+        data = {"pass_domains": pass_domains, "mails": mails,
+                "no_mail": no_mail,
+                "counts": {"pass": len(pass_domains),
+                           "matched": len(matched),
+                           "mails": len(mails)}}
+    except Exception as e:
+        err = "khong doc duoc sheet Check mail: " + str(e)[:150]
+        data = None
+    MAIL_CACHE.update({"at": now, "url1": url1, "url2": url2,
+                       "data": data, "error": err})
+    return data, err
+
+
 def _records_match(records, preset, domain):
     """Record hien co co khop preset khong (so theo type + ten day du + content)."""
     want = {(r["type"].upper(), expand_name(domain, r.get("name", "")).lower(),
@@ -1082,6 +1189,36 @@ def _sheet_current_preset(domain, cfg, st):
         return None
 
 
+def _sheet_is_fully_setup(domain, preset, cfg, st):
+    """Domain da setup day du theo preset chua: record khop preset +
+    email da bat (neu preset email bat) + HTTPS dung preset (neu preset
+    HTTPS bat). Dung status day du da luu; chua co / chi light / loi thi
+    check moi va luu lai. Khong xac dinh duoc thi tra False (se chay
+    setup binh thuong)."""
+    s = (st or {}).get(domain) or {}
+    if (not s or s.get("error") or s.get("light")
+            or not s.get("records_preset")):
+        try:
+            new = check_domain(domain, cfg, skip_nc=True)
+            _save_check_result(st, domain, new)
+            s = new
+        except Exception:
+            return False
+    if s.get("records_preset") != preset:
+        return False
+    if (cfg.get("email_preset") or {}).get("enabled"):
+        em = s.get("email") or {}
+        if not em.get("enabled"):
+            return False
+    if (cfg.get("https_preset") or {}).get("enabled"):
+        hp = cfg.get("https_preset") or {}
+        hs = s.get("https") or {}
+        if (hs.get("ssl") != hp.get("ssl")
+                or hs.get("always_https") != hp.get("always_https")):
+            return False
+    return True
+
+
 def _sa_access_token(cfg):
     """Lay access token tu service account JSON (google-auth)."""
     from google.oauth2 import service_account
@@ -1171,11 +1308,16 @@ def _sheet_classify(rows, cfg, st):
                 r["action"] = "review"
                 r["detail"] = f"đang dùng '{cur}', sheet muốn '{r['preset']}'"
                 r["current"] = cur
+            elif cur and _sheet_is_fully_setup(d, r["preset"], cfg, st):
+                # Da setup day du roi — chay se chi cap nhat cot J, khong
+                # chay setup lai.
+                r["action"] = "setup"
+                r["detail"] = f"đã setup sẵn theo '{r['preset']}' — chỉ cập nhật cột J"
             else:
                 r["action"] = "setup"
                 r["detail"] = ("chưa có preset — sẽ setup theo "
                                f"'{r['preset']}'" if not cur else
-                               f"đã đúng preset '{r['preset']}'")
+                               f"đã đúng preset '{r['preset']}' — sẽ hoàn tất phần còn thiếu")
         out.append(r)
     return out
 
@@ -1192,6 +1334,15 @@ def _sheet_setup_one(domain, row, preset, cfg, st, custom_id=None, attempts=1):
     ignored = cfg.get("sheet_ignored") or []
     if domain in ignored:
         cfg["sheet_ignored"] = [d for d in ignored if d != domain]
+    # Da setup day du roi (record khop preset + email + HTTPS) thi KHONG
+    # chay setup lai — chi ghi 'Da set up' vao cot J la du. (Chi ap dung
+    # khi khong co TXT _cf-custom-hostname can them/cap nhat o cot L.)
+    if not custom_id and _sheet_is_fully_setup(domain, preset, cfg, st):
+        ok_w, det_w = sheet_write_status(row, SHEET_DONE_DISPLAY, cfg)
+        return {"domain": domain, "row": row, "preset": preset,
+                "action": "done",
+                "detail": ("đã setup sẵn — chỉ cập nhật cột J" if ok_w else
+                           f"đã setup sẵn — NHƯNG ghi sheet lỗi: {det_w}")}
     extra = []
     if preset == SHEET_CUSTOM_HOSTNAME_PRESET:
         rec = _sheet_custom_hostname_record(custom_id)
@@ -1554,6 +1705,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "autorenew": {}, "expiry": {},
                             "count": 0, "error": str(e)[:200]})
             return
+        if path == "/api/mail-check":
+            # Check mail: doc 2 sheet xuat ban, loc domain Pass (cot H
+            # Sheet 1), join mail theo cot Domain (Sheet 2). Chi doc,
+            # khong ghi gi vao sheet. ?force=1 de tai lai bo qua cache.
+            cfg = load_config()
+            try:
+                force = urllib.parse.parse_qs(p.query).get("force", [""])[0] == "1"
+                data, err = _fetch_mail_check(cfg, force=force)
+                if err:
+                    self._json({"ok": False, "error": err})
+                else:
+                    self._json({"ok": True, "data": data})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)[:200]})
+            return
         if path == "/api/sus-status":
             # Tinh trang Sus cua domain (doc tu sheet Sus rieng, chi
             # doc de hien o tab Auto-renew). Tra ve {domain: {status,
@@ -1593,7 +1759,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/settings":
                 for k in ("cf_token", "cf_account_id", "nc_user", "nc_api_key", "nc_client_ip",
-                          "chrome_profile_dir", "chrome_profile", "sus_sheet_csv_url"):
+                          "chrome_profile_dir", "chrome_profile", "sus_sheet_csv_url",
+                          "mail_sheet1_csv_url", "mail_sheet2_csv_url"):
                     if k in body:
                         cfg[k] = str(body[k]).strip()
                 save_config(cfg)
@@ -2293,6 +2460,25 @@ class Handler(BaseHTTPRequestHandler):
                 save_config(cfg)
                 save_status(st)
                 self._json({"ok": True, "result": res})
+            elif path == "/api/mail-note":
+                # Luu ghi chu Check mail (chi luu trong app — config.json,
+                # khong ghi nguoc vao Google Sheet). Key = dia chi mail
+                # (viet thuong). Ghi chu rong thi xoa.
+                mail = str(body.get("mail") or "").strip().lower()
+                note = str(body.get("note") or "")
+                if not mail:
+                    self._json({"error": "thiếu địa chỉ mail"}, 400)
+                    return
+                notes = dict(cfg.get("mail_notes") or {})
+                if note.strip():
+                    notes[mail] = note
+                else:
+                    notes.pop(mail, None)
+                cfg["mail_notes"] = notes
+                save_config(cfg)
+                # Ghi chu doi thi bo cache de lan doc sau thay ngay.
+                MAIL_CACHE["at"] = 0.0
+                self._json({"ok": True})
             elif path == "/api/sheet-accept":
                 # Chap nhan domain trong hang cho duyet: setup theo preset
                 # trong sheet, ghi 'da set up' ve cot J, xoa khoi hang doi.
